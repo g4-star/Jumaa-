@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'dart:io';
@@ -19,6 +21,8 @@ Future<void> main() async {
 
   runApp(const ApartmentApp());
 }
+
+// After Supabase.initialize(), before runApp:
 
 class ApartmentApp extends StatefulWidget {
   const ApartmentApp({super.key});
@@ -84,7 +88,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     final pages = <Widget>[
       const DashboardHome(),
-      const ApartmentsPage(),
+      const ManageApartmentsPage(),
       const TenantsPage(),
       SettingsPage(
         isDarkMode: widget.isDarkMode,
@@ -233,7 +237,9 @@ class DashboardHome extends StatelessWidget {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const ApartmentsPage()),
+                  MaterialPageRoute(
+                    builder: (_) => const OwnerApartmentManagementPage(),
+                  ),
                 );
               },
             ),
@@ -339,8 +345,1818 @@ class DashboardHome extends StatelessWidget {
 }
 
 // ============================================================
+// OWNER APARTMENT MANAGEMENT
+// ============================================================
+
+class OwnerApartmentManagementPage extends StatefulWidget {
+  const OwnerApartmentManagementPage({super.key});
+
+  @override
+  State<OwnerApartmentManagementPage> createState() =>
+      _OwnerApartmentManagementPageState();
+}
+
+class _OwnerApartmentManagementPageState
+    extends State<OwnerApartmentManagementPage> {
+  Property? get property {
+    if (OpenNestStore.properties.isEmpty) {
+      return null;
+    }
+    return OpenNestStore.properties.first;
+  }
+
+  List<Apartment> get units {
+    final currentProperty = property;
+
+    if (currentProperty == null) {
+      return [];
+    }
+
+    return OpenNestStore.apartments
+        .where((unit) => unit.propertyId == currentProperty.id)
+        .toList();
+  }
+
+  int get occupied => units.where((unit) => unit.status == 'Occupied').length;
+
+  int get vacant => units.where((unit) => unit.status == 'Vacant').length;
+
+  int get maintenance =>
+      units.where((unit) => unit.status == 'Maintenance').length;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentProperty = property;
+
+    if (currentProperty == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Apartment Management')),
+        body: const Center(
+          child: Text('No apartment has been registered yet.'),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Apartment Management',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          setState(() {});
+        },
+        child: ListView(
+          padding: const EdgeInsets.all(18),
+          children: [
+            // PROPERTY HEADER
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF0B3D2E), Color(0xFF126B4F)],
+                ),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.apartment_rounded,
+                    color: Colors.white,
+                    size: 38,
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    currentProperty.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 7),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.location_on_outlined,
+                        color: Colors.white70,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          currentProperty.location.isEmpty
+                              ? 'Location not provided'
+                              : currentProperty.location,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 22),
+
+            const Text(
+              'Property Overview',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+
+            const SizedBox(height: 12),
+
+            Row(
+              children: [
+                Expanded(
+                  child: _managementStat(
+                    'Total Units',
+                    units.length.toString(),
+                    Icons.home_work_outlined,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _managementStat(
+                    'Occupied',
+                    occupied.toString(),
+                    Icons.people_outline,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+
+            Row(
+              children: [
+                Expanded(
+                  child: _managementStat(
+                    'Vacant',
+                    vacant.toString(),
+                    Icons.home_outlined,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _managementStat(
+                    'Maintenance',
+                    maintenance.toString(),
+                    Icons.build_outlined,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 24),
+
+            const Text(
+              'Property Management',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+
+            const SizedBox(height: 12),
+
+            _managementAction(
+              icon: Icons.edit_outlined,
+              title: 'Edit Property',
+              subtitle: 'Change name, location, address and contact details',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        OwnerEditPropertyPage(property: currentProperty),
+                  ),
+                ).then((_) {
+                  if (mounted) {
+                    setState(() {});
+                  }
+                });
+              },
+            ),
+
+            _managementAction(
+              icon: Icons.photo_library_outlined,
+              title: 'Photos & Videos',
+              subtitle: 'Manage the photos and videos shown publicly',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        OwnerPropertyMediaPage(property: currentProperty),
+                  ),
+                ).then((_) {
+                  if (mounted) {
+                    setState(() {});
+                  }
+                });
+              },
+            ),
+
+            _managementAction(
+              icon: Icons.home_work_outlined,
+              title: 'Manage Units',
+              subtitle: 'Manage occupied, vacant and maintenance units',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        OwnerUnitsManagementPage(property: currentProperty),
+                  ),
+                ).then((_) {
+                  if (mounted) {
+                    setState(() {});
+                  }
+                });
+              },
+            ),
+
+            const SizedBox(height: 24),
+
+            const Text(
+              'Property Information',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+
+            const SizedBox(height: 12),
+
+            Card(
+              elevation: 0,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _infoRow(
+                      Icons.location_on_outlined,
+                      'Location',
+                      currentProperty.location,
+                    ),
+                    const Divider(height: 24),
+                    _infoRow(
+                      Icons.place_outlined,
+                      'Address',
+                      currentProperty.address,
+                    ),
+                    const Divider(height: 24),
+                    _infoRow(
+                      Icons.phone_outlined,
+                      'Phone',
+                      currentProperty.phone,
+                    ),
+                    const Divider(height: 24),
+                    _infoRow(
+                      Icons.email_outlined,
+                      'Email',
+                      currentProperty.email,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _managementStat(String title, String value, IconData icon) {
+    return Card(
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.all(15),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 22),
+            const SizedBox(height: 9),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              title,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _managementAction({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+        leading: CircleAvatar(child: Icon(icon)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text(subtitle),
+        trailing: const Icon(Icons.arrow_forward_ios, size: 15),
+        onTap: onTap,
+      ),
+    );
+  }
+
+  Widget _infoRow(IconData icon, String title, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 21),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                value.isEmpty ? 'Not provided' : value,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================
+// OWNER EDIT PROPERTY PAGE
+// ============================================================
+
+class OwnerEditPropertyPage extends StatefulWidget {
+  final Property property;
+
+  const OwnerEditPropertyPage({super.key, required this.property});
+
+  @override
+  State<OwnerEditPropertyPage> createState() => _OwnerEditPropertyPageState();
+}
+
+class _OwnerEditPropertyPageState extends State<OwnerEditPropertyPage> {
+  late final TextEditingController nameController;
+  late final TextEditingController locationController;
+  late final TextEditingController addressController;
+  late final TextEditingController phoneController;
+  late final TextEditingController emailController;
+  late final TextEditingController descriptionController;
+
+  @override
+  void initState() {
+    super.initState();
+
+    nameController = TextEditingController(text: widget.property.name);
+    locationController = TextEditingController(text: widget.property.location);
+    addressController = TextEditingController(text: widget.property.address);
+    phoneController = TextEditingController(text: widget.property.phone);
+    emailController = TextEditingController(text: widget.property.email);
+    descriptionController = TextEditingController(
+      text: widget.property.description,
+    );
+  }
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    locationController.dispose();
+    addressController.dispose();
+    phoneController.dispose();
+    emailController.dispose();
+    descriptionController.dispose();
+    super.dispose();
+  }
+
+  void saveProperty() {
+    final name = nameController.text.trim();
+
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Apartment name is required.')),
+      );
+      return;
+    }
+
+    widget.property.name = name;
+    widget.property.location = locationController.text.trim();
+    widget.property.address = addressController.text.trim();
+    widget.property.phone = phoneController.text.trim();
+    widget.property.email = emailController.text.trim();
+    widget.property.description = descriptionController.text.trim();
+
+    // Keep the existing unit records synchronized with the
+    // property information.
+    for (final unit in OpenNestStore.apartments) {
+      if (unit.propertyId == widget.property.id) {
+        unit.propertyName = widget.property.name;
+        unit.location = widget.property.location;
+        unit.description = widget.property.description;
+      }
+    }
+
+    Navigator.pop(context);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Property updated successfully.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Edit Property',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          _input(
+            controller: nameController,
+            label: 'Apartment / Property Name',
+            icon: Icons.apartment_outlined,
+          ),
+          _input(
+            controller: locationController,
+            label: 'Location',
+            icon: Icons.location_on_outlined,
+          ),
+          _input(
+            controller: addressController,
+            label: 'Address',
+            icon: Icons.place_outlined,
+          ),
+          _input(
+            controller: phoneController,
+            label: 'Contact Phone',
+            icon: Icons.phone_outlined,
+            keyboardType: TextInputType.phone,
+          ),
+          _input(
+            controller: emailController,
+            label: 'Contact Email',
+            icon: Icons.email_outlined,
+            keyboardType: TextInputType.emailAddress,
+          ),
+          _input(
+            controller: descriptionController,
+            label: 'Description',
+            icon: Icons.description_outlined,
+            maxLines: 5,
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: saveProperty,
+              icon: const Icon(Icons.save_outlined),
+              label: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 14),
+                child: Text('SAVE CHANGES'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _input({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    TextInputType? keyboardType,
+    int maxLines = 1,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: TextField(
+        controller: controller,
+        keyboardType: keyboardType,
+        maxLines: maxLines,
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon),
+          border: const OutlineInputBorder(),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// PROPERTY MEDIA MANAGEMENT PAGE
+// ============================================================
+
+class OwnerPropertyMediaPage extends StatefulWidget {
+  final Property property;
+
+  const OwnerPropertyMediaPage({super.key, required this.property});
+
+  @override
+  State<OwnerPropertyMediaPage> createState() => _OwnerPropertyMediaPageState();
+}
+
+class _OwnerPropertyMediaPageState extends State<OwnerPropertyMediaPage> {
+  @override
+  Widget build(BuildContext context) {
+    final images = widget.property.imagePaths;
+    final videos = widget.property.videoPaths;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Photos & Videos',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(18),
+        children: [
+          const Text(
+            'Property Photos',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'These photos will be displayed on the public apartment page.',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 14),
+
+          if (images.isEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(30),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.photo_library_outlined,
+                      size: 55,
+                      color: Colors.grey.shade500,
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'No apartment photos added yet.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ...images.map(
+              (path) => Card(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ListTile(
+                  leading: const Icon(Icons.image_outlined),
+                  title: Text(
+                    path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () {
+                      setState(() {
+                        images.remove(path);
+                      });
+                    },
+                  ),
+                ),
+              ),
+            ),
+
+          const SizedBox(height: 20),
+
+          const Text(
+            'Property Videos',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+
+          const SizedBox(height: 6),
+
+          Text(
+            'Videos can be connected to the property media system here.',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+
+          const SizedBox(height: 14),
+
+          if (videos.isEmpty)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(25),
+                child: Text(
+                  'No apartment videos added yet.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
+          else
+            ...videos.map(
+              (path) => Card(
+                child: ListTile(
+                  leading: const Icon(Icons.video_library_outlined),
+                  title: Text(
+                    path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () {
+                      setState(() {
+                        videos.remove(path);
+                      });
+                    },
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================
+// OWNER UNIT MANAGEMENT PAGE
+// ============================================================
+
+class OwnerUnitsManagementPage extends StatefulWidget {
+  final Property property;
+
+  const OwnerUnitsManagementPage({super.key, required this.property});
+
+  @override
+  State<OwnerUnitsManagementPage> createState() =>
+      _OwnerUnitsManagementPageState();
+}
+
+class _OwnerUnitsManagementPageState extends State<OwnerUnitsManagementPage> {
+  List<Apartment> get units {
+    return OpenNestStore.apartments
+        .where((unit) => unit.propertyId == widget.property.id)
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final propertyUnits = units;
+
+    final occupied = propertyUnits.where((u) => u.status == 'Occupied').length;
+    final vacant = propertyUnits.where((u) => u.status == 'Vacant').length;
+    final maintenance = propertyUnits
+        .where((u) => u.status == 'Maintenance')
+        .length;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Manage Units',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(18),
+        children: [
+          Text(
+            widget.property.name,
+            style: const TextStyle(fontSize: 23, fontWeight: FontWeight.bold),
+          ),
+
+          const SizedBox(height: 5),
+
+          Text(
+            '${propertyUnits.length} total units',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+
+          const SizedBox(height: 18),
+
+          Row(
+            children: [
+              Expanded(
+                child: _statusCard('Occupied', occupied, Icons.people_outline),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _statusCard('Vacant', vacant, Icons.home_outlined),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _statusCard(
+                  'Maintenance',
+                  maintenance,
+                  Icons.build_outlined,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 22),
+
+          ...propertyUnits.map(
+            (unit) => Card(
+              elevation: 0,
+              margin: const EdgeInsets.only(bottom: 10),
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 15,
+                  vertical: 5,
+                ),
+                leading: CircleAvatar(
+                  child: Text(
+                    unit.number.length > 3
+                        ? unit.number.substring(unit.number.length - 3)
+                        : unit.number,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+                title: Text(
+                  unit.number,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(
+                  '${unit.type} • ${unit.rent}\n${unit.tenant.isEmpty ? 'No tenant' : unit.tenant}',
+                ),
+                isThreeLine: true,
+                trailing: _statusBadge(unit.status),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => OwnerEditUnitPage(unit: unit),
+                    ),
+                  ).then((_) {
+                    if (mounted) {
+                      setState(() {});
+                    }
+                  });
+                },
+              ),
+            ),
+          ),
+
+          if (propertyUnits.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(35),
+              child: Column(
+                children: [
+                  Icon(Icons.home_work_outlined, size: 55),
+                  SizedBox(height: 12),
+                  Text(
+                    'No units are connected to this property yet.',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusCard(String title, int value, IconData icon) {
+    return Card(
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 13),
+        child: Column(
+          children: [
+            Icon(icon, size: 20),
+            const SizedBox(height: 6),
+            Text(
+              value.toString(),
+              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 10),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statusBadge(String status) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: Colors.grey.shade200,
+      ),
+      child: Text(
+        status,
+        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// OWNER EDIT UNIT PAGE
+// ============================================================
+
+class OwnerEditUnitPage extends StatefulWidget {
+  final Apartment unit;
+
+  const OwnerEditUnitPage({super.key, required this.unit});
+
+  @override
+  State<OwnerEditUnitPage> createState() => _OwnerEditUnitPageState();
+}
+
+class _OwnerEditUnitPageState extends State<OwnerEditUnitPage> {
+  late final TextEditingController numberController;
+  late final TextEditingController typeController;
+  late final TextEditingController rentController;
+  late final TextEditingController tenantController;
+
+  late String selectedStatus;
+
+  @override
+  void initState() {
+    super.initState();
+
+    numberController = TextEditingController(text: widget.unit.number);
+    typeController = TextEditingController(text: widget.unit.type);
+    rentController = TextEditingController(text: widget.unit.rent);
+    tenantController = TextEditingController(text: widget.unit.tenant);
+
+    selectedStatus = widget.unit.status;
+  }
+
+  @override
+  void dispose() {
+    numberController.dispose();
+    typeController.dispose();
+    rentController.dispose();
+    tenantController.dispose();
+    super.dispose();
+  }
+
+  void saveUnit() {
+    widget.unit.number = numberController.text.trim();
+    widget.unit.type = typeController.text.trim();
+    widget.unit.rent = rentController.text.trim();
+    widget.unit.tenant = tenantController.text.trim();
+    widget.unit.status = selectedStatus;
+
+    Navigator.pop(context);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Unit updated successfully.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Edit ${widget.unit.number}',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          TextField(
+            controller: numberController,
+            decoration: const InputDecoration(
+              labelText: 'Unit Number',
+              prefixIcon: Icon(Icons.tag),
+              border: OutlineInputBorder(),
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          TextField(
+            controller: typeController,
+            decoration: const InputDecoration(
+              labelText: 'Unit Type',
+              prefixIcon: Icon(Icons.bed_outlined),
+              border: OutlineInputBorder(),
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          TextField(
+            controller: rentController,
+            decoration: const InputDecoration(
+              labelText: 'Rent',
+              prefixIcon: Icon(Icons.payments_outlined),
+              border: OutlineInputBorder(),
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          TextField(
+            controller: tenantController,
+            decoration: const InputDecoration(
+              labelText: 'Tenant',
+              prefixIcon: Icon(Icons.person_outline),
+              border: OutlineInputBorder(),
+            ),
+          ),
+
+          const SizedBox(height: 18),
+
+          DropdownButtonFormField<String>(
+            initialValue: selectedStatus,
+            decoration: const InputDecoration(
+              labelText: 'Unit Status',
+              prefixIcon: Icon(Icons.circle_outlined),
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'Occupied', child: Text('Occupied')),
+              DropdownMenuItem(value: 'Vacant', child: Text('Vacant')),
+              DropdownMenuItem(
+                value: 'Maintenance',
+                child: Text('Maintenance'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) {
+                setState(() {
+                  selectedStatus = value;
+                });
+              }
+            },
+          ),
+
+          const SizedBox(height: 25),
+
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: saveUnit,
+              icon: const Icon(Icons.save_outlined),
+              label: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 14),
+                child: Text('SAVE UNIT'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================
 // APARTMENTS SCREEN
 // ============================================================
+
+// ============================================================
+// PUBLIC PROPERTY DETAILS PAGE
+// ============================================================
+
+class PublicPropertyDetailsPage extends StatefulWidget {
+  final Property property;
+
+  const PublicPropertyDetailsPage({super.key, required this.property});
+
+  @override
+  State<PublicPropertyDetailsPage> createState() =>
+      _PublicPropertyDetailsPageState();
+}
+
+class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
+  @override
+  Widget build(BuildContext context) {
+    final property = widget.property;
+    final units = OpenNestStore.apartments
+        .where((u) => u.propertyId == property.id)
+        .toList();
+    final images = property.imagePaths;
+
+    final availableUnits = units
+        .where((unit) => unit.status == 'Vacant')
+        .toList();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Apartment Details',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.only(bottom: 30),
+        children: [
+          if (images.isNotEmpty)
+            SizedBox(
+              height: 270,
+              child: PageView.builder(
+                itemCount: images.length,
+                itemBuilder: (context, index) {
+                  return Image.file(
+                    File(images[index]),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) {
+                      return _placeholder();
+                    },
+                  );
+                },
+              ),
+            )
+          else
+            SizedBox(height: 270, child: _placeholder()),
+
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  property.name,
+                  style: const TextStyle(
+                    fontSize: 27,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.location_on_outlined,
+                      size: 20,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        property.location,
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
+
+                const Text(
+                  'About this apartment',
+                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+                ),
+
+                const SizedBox(height: 9),
+
+                Text(
+                  property.description,
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    height: 1.5,
+                    fontSize: 14,
+                  ),
+                ),
+
+                const SizedBox(height: 26),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Available Units',
+                      style: TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      '${availableUnits.length} available',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                if (availableUnits.isEmpty)
+                  Card(
+                    elevation: 0,
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, color: Colors.grey.shade600),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text('There are currently no vacant units.'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  ...availableUnits.map((unit) => _publicUnitCard(unit)),
+
+                const SizedBox(height: 28),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _startChat,
+                        icon: const Icon(Icons.chat_outlined),
+                        label: const Text('CHAT'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: availableUnits.isEmpty
+                            ? null
+                            : _openBookingForm,
+                        icon: const Icon(Icons.event_available),
+                        label: const Text('BOOK NOW'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _publicUnitCard(Apartment unit) {
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(15),
+        child: Row(
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary
+                    .withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.home_outlined),
+            ),
+
+            const SizedBox(width: 13),
+
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Room ${unit.number}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    unit.type,
+                    style: const TextStyle(color: Colors.black54),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    unit.rent,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                'Available',
+                style: TextStyle(
+                  color: Colors.green.shade700,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _placeholder() {
+    return Container(
+      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
+      child: Center(
+        child: Icon(
+          Icons.apartment,
+          size: 75,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+    );
+  }
+
+  void _startChat() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ChatListScreen()),
+    );
+  }
+
+  void _openBookingForm() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Booking form is being prepared.')),
+    );
+  }
+}
+
+class ManageApartmentsPage extends StatefulWidget {
+  const ManageApartmentsPage({super.key});
+
+  @override
+  State<ManageApartmentsPage> createState() => _ManageApartmentsPageState();
+}
+
+class _ManageApartmentsPageState extends State<ManageApartmentsPage> {
+  String _searchQuery = '';
+
+  List<Property> get _properties => OpenNestStore.properties;
+
+  List<Apartment> _unitsForProperty(String propertyId) {
+    return OpenNestStore.apartments
+        .where((unit) => unit.propertyId == propertyId)
+        .toList();
+  }
+
+  void _refresh() {
+    setState(() {});
+  }
+
+  void _openProperty(Property property) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ManagePropertyPage(property: property)),
+    ).then((_) => _refresh());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _searchQuery.trim().toLowerCase();
+
+    final properties = _properties.where((property) {
+      if (query.isEmpty) {
+        return true;
+      }
+
+      return property.name.toLowerCase().contains(query) ||
+          property.location.toLowerCase().contains(query) ||
+          property.address.toLowerCase().contains(query);
+    }).toList();
+
+    final totalUnits = OpenNestStore.apartments.length;
+    final vacantUnits = OpenNestStore.apartments
+        .where((unit) => unit.status == 'Vacant')
+        .length;
+    final occupiedUnits = OpenNestStore.apartments
+        .where((unit) => unit.status == 'Occupied')
+        .length;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Manage Apartments',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async => _refresh(),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            TextField(
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
+              decoration: InputDecoration(
+                hintText: 'Search apartments...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchQuery.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          setState(() {
+                            _searchQuery = '';
+                          });
+                        },
+                      ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            Row(
+              children: [
+                Expanded(
+                  child: _summaryCard(
+                    'Properties',
+                    _properties.length.toString(),
+                    Icons.apartment_outlined,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _summaryCard(
+                    'Units',
+                    totalUnits.toString(),
+                    Icons.home_outlined,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _summaryCard(
+                    'Vacant',
+                    vacantUnits.toString(),
+                    Icons.check_circle_outline,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            Card(
+              elevation: 0,
+              child: ListTile(
+                leading: const Icon(Icons.people_outline),
+                title: const Text('Occupied Units'),
+                trailing: Text(
+                  occupiedUnits.toString(),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Your Properties',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                FilledButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const RegisterApartmentPage(),
+                      ),
+                    ).then((_) => _refresh());
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add'),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            if (properties.isEmpty)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.apartment_outlined,
+                        size: 55,
+                        color: Colors.grey.shade400,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'No apartments found',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Register a property to start managing apartments.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              ...properties.map(_propertyCard),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _summaryCard(String title, String value, IconData icon) {
+    return Card(
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+        child: Column(
+          children: [
+            Icon(icon),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _propertyCard(Property property) {
+    final units = _unitsForProperty(property.id);
+    final vacant = units.where((unit) => unit.status == 'Vacant').length;
+    final occupied = units.where((unit) => unit.status == 'Occupied').length;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _openProperty(property),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary
+                          .withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(Icons.apartment_outlined),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          property.name,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        if (property.location.trim().isNotEmpty)
+                          Text(
+                            property.location,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.grey),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
+
+              const SizedBox(height: 14),
+
+              Row(
+                children: [
+                  _statusChip('${units.length} units', Icons.home_outlined),
+                  const SizedBox(width: 8),
+                  _statusChip('$vacant vacant', Icons.check_circle_outline),
+                  const SizedBox(width: 8),
+                  _statusChip('$occupied occupied', Icons.person_outline),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _statusChip(String text, IconData icon) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest
+              .withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 14),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                text,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ManagePropertyPage extends StatefulWidget {
+  final Property property;
+
+  const ManagePropertyPage({super.key, required this.property});
+
+  @override
+  State<ManagePropertyPage> createState() => _ManagePropertyPageState();
+}
+
+class _ManagePropertyPageState extends State<ManagePropertyPage> {
+  List<Apartment> get _units => OpenNestStore.apartments
+      .where((unit) => unit.propertyId == widget.property.id)
+      .toList();
+
+  void _refresh() {
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final property = widget.property;
+    final units = _units;
+
+    final vacant = units.where((unit) => unit.status == 'Vacant').length;
+    final occupied = units.where((unit) => unit.status == 'Occupied').length;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          property.name,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            elevation: 0,
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    property.name,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (property.location.trim().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      property.location,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  ],
+                  if (property.address.trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      property.address,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  ],
+                  if (property.description.trim().isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      property.description,
+                      style: const TextStyle(height: 1.4),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          Row(
+            children: [
+              Expanded(
+                child: _metric(
+                  'Total',
+                  units.length.toString(),
+                  Icons.home_outlined,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _metric(
+                  'Vacant',
+                  vacant.toString(),
+                  Icons.check_circle_outline,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _metric(
+                  'Occupied',
+                  occupied.toString(),
+                  Icons.person_outline,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 22),
+
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Units',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              FilledButton.icon(
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Unit management can be connected to the existing unit form.',
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Add Unit'),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          if (units.isEmpty)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(22),
+                child: Text(
+                  'No units have been added to this property yet.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
+          else
+            ...units.map(_unitTile),
+        ],
+      ),
+    );
+  }
+
+  Widget _metric(String title, String value, IconData icon) {
+    return Card(
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Column(
+          children: [
+            Icon(icon),
+            const SizedBox(height: 5),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _unitTile(Apartment unit) {
+    final available = unit.status == 'Vacant';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 9),
+      child: ListTile(
+        leading: CircleAvatar(
+          child: Icon(
+            available ? Icons.check_circle_outline : Icons.person_outline,
+          ),
+        ),
+        title: Text(
+          unit.number,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(
+          '${unit.type} • ${unit.rent}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Text(
+          unit.status,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: available ? Colors.green.shade700 : Colors.orange.shade700,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class ApartmentsPage extends StatefulWidget {
   const ApartmentsPage({super.key});
@@ -354,55 +2170,50 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
 
   List<Apartment> get apartments => OpenNestStore.apartments;
 
-  List<String> get properties {
-    final names = apartments
-        .map((a) => a.propertyName.trim())
-        .where((name) => name.isNotEmpty)
-        .toSet()
-        .toList();
+  List<Property> get properties => OpenNestStore.properties;
 
-    names.sort();
-    return names;
+  List<Apartment> unitsForProperty(String propertyId) {
+    return apartments.where((unit) => unit.propertyId == propertyId).toList();
   }
 
-  List<Apartment> unitsForProperty(String propertyName) {
-    return apartments.where((a) => a.propertyName == propertyName).toList();
-  }
-
-  List<String> propertyImages(String propertyName) {
-    final units = unitsForProperty(propertyName);
-
-    final images = <String>[];
-
-    for (final unit in units) {
-      images.addAll(unit.imagePaths);
-    }
-
-    return images.toSet().toList();
-  }
-
-  String propertyLocation(String propertyName) {
-    final units = unitsForProperty(propertyName);
-
-    for (final unit in units) {
-      if (unit.location.trim().isNotEmpty) {
-        return unit.location;
+  Property? propertyById(String propertyId) {
+    for (final property in properties) {
+      if (property.id == propertyId) {
+        return property;
       }
     }
 
-    return 'Location not provided';
+    return null;
   }
 
-  String propertyDescription(String propertyName) {
-    final units = unitsForProperty(propertyName);
+  List<String> propertyImages(String propertyId) {
+    final property = propertyById(propertyId);
 
-    for (final unit in units) {
-      if (unit.description.trim().isNotEmpty) {
-        return unit.description;
-      }
+    if (property == null) {
+      return [];
     }
 
-    return 'Beautiful apartments with comfortable living spaces and convenient amenities.';
+    return property.imagePaths.toSet().toList();
+  }
+
+  String propertyLocation(String propertyId) {
+    final property = propertyById(propertyId);
+
+    if (property == null || property.location.trim().isEmpty) {
+      return 'Location not provided';
+    }
+
+    return property.location;
+  }
+
+  String propertyDescription(String propertyId) {
+    final property = propertyById(propertyId);
+
+    if (property == null || property.description.trim().isEmpty) {
+      return 'Beautiful apartments with comfortable living spaces and convenient amenities.';
+    }
+
+    return property.description;
   }
 
   @override
@@ -414,8 +2225,8 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
 
       final query = searchQuery.toLowerCase();
 
-      return property.toLowerCase().contains(query) ||
-          propertyLocation(property).toLowerCase().contains(query);
+      return property.name.toLowerCase().contains(query) ||
+          propertyLocation(property.id).toLowerCase().contains(query);
     }).toList();
 
     return Scaffold(
@@ -504,11 +2315,11 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
     );
   }
 
-  Widget _propertyCard(String propertyName) {
-    final units = unitsForProperty(propertyName);
+  Widget _propertyCard(Property property) {
+    final units = unitsForProperty(property.id);
     final available = units.where((u) => u.status == 'Vacant').length;
-    final images = propertyImages(propertyName);
-    final location = propertyLocation(propertyName);
+    final images = propertyImages(property.id);
+    final location = propertyLocation(property.id);
 
     return Card(
       elevation: 1,
@@ -516,7 +2327,7 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
-          _showPropertyDetails(propertyName);
+          _showPropertyDetails(property);
         },
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -541,7 +2352,7 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    propertyName,
+                    property.name,
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -570,7 +2381,7 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
                   const SizedBox(height: 10),
 
                   Text(
-                    propertyDescription(propertyName),
+                    propertyDescription(property.id),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.black54, height: 1.4),
@@ -598,7 +2409,7 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
                     width: double.infinity,
                     child: FilledButton(
                       onPressed: () {
-                        _showPropertyDetails(propertyName);
+                        _showPropertyDetails(property);
                       },
                       child: const Text('VIEW APARTMENT'),
                     ),
@@ -674,149 +2485,12 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
     );
   }
 
-  void _showPropertyDetails(String propertyName) {
-    final units = unitsForProperty(propertyName);
-    final images = propertyImages(propertyName);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.92,
-          minChildSize: 0.60,
-          maxChildSize: 0.97,
-          builder: (_, controller) {
-            return Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              child: ListView(
-                controller: controller,
-                padding: const EdgeInsets.only(bottom: 30),
-                children: [
-                  if (images.isNotEmpty)
-                    SizedBox(
-                      height: 230,
-                      child: PageView.builder(
-                        itemCount: images.length,
-                        itemBuilder: (_, index) {
-                          return Image.file(
-                            File(images[index]),
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) {
-                              return _propertyPlaceholder();
-                            },
-                          );
-                        },
-                      ),
-                    )
-                  else
-                    SizedBox(height: 230, child: _propertyPlaceholder()),
-
-                  Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          propertyName,
-                          style: const TextStyle(
-                            fontSize: 25,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.location_on_outlined,
-                              size: 19,
-                              color: Colors.grey,
-                            ),
-                            const SizedBox(width: 5),
-                            Expanded(
-                              child: Text(
-                                propertyLocation(propertyName),
-                                style: const TextStyle(color: Colors.black54),
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 20),
-
-                        const Text(
-                          'About this apartment',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        Text(
-                          propertyDescription(propertyName),
-                          style: const TextStyle(
-                            height: 1.5,
-                            color: Colors.black54,
-                          ),
-                        ),
-
-                        const SizedBox(height: 22),
-
-                        const Text(
-                          'Available Units',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-
-                        const SizedBox(height: 10),
-
-                        ...units.map((unit) => _unitCard(sheetContext, unit)),
-
-                        const SizedBox(height: 20),
-
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () {
-                                  _showChatMessage(sheetContext);
-                                },
-                                icon: const Icon(Icons.chat_outlined),
-                                label: const Text('CHAT'),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: FilledButton.icon(
-                                onPressed: () {
-                                  Navigator.pop(sheetContext);
-                                  _showBookingForm(propertyName);
-                                },
-                                icon: const Icon(Icons.event_available),
-                                label: const Text('BOOK NOW'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+  void _showPropertyDetails(Property property) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PublicPropertyDetailsPage(property: property),
+      ),
     );
   }
 
@@ -888,17 +2562,40 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
   }
 
   void _showChatMessage(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Chat with the landlord will be available here so you can confirm availability before booking.',
+    // First, determine who the landlord is for this property
+    // For now, use a dialog to start a new conversation
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Start Chat'),
+        content: const Text(
+          'This will open a chat with the property landlord. '
+          'You\'ll be able to ask questions and confirm availability.',
         ),
-        behavior: SnackBarBehavior.floating,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+
+              // TODO: Replace with actual landlord ID once auth is hooked up
+              // For now we navigate to the chat list
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => ChatListScreen()),
+              );
+            },
+            child: const Text('Start Chat'),
+          ),
+        ],
       ),
     );
   }
 
-  void _showBookingForm(String propertyName) {
+  void _showBookingForm(Property property) {
     final nameController = TextEditingController();
     final emailController = TextEditingController();
     final phoneController = TextEditingController();
@@ -907,7 +2604,7 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
 
     String? selectedUnit;
 
-    final availableUnits = unitsForProperty(propertyName)
+    final availableUnits = unitsForProperty(property.id)
         .where((unit) => unit.status == 'Vacant')
         .toList();
 
@@ -938,7 +2635,7 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Book $propertyName',
+                        'Book ${property.name}',
                         style: const TextStyle(
                           fontSize: 23,
                           fontWeight: FontWeight.bold,
@@ -1177,13 +2874,58 @@ class Owner {
 }
 
 // ============================================================
+// PROPERTY MODEL
+// ============================================================
+
+class Property {
+  String id;
+  String name;
+  String location;
+  String address;
+  String description;
+  String email;
+  String phone;
+  List<String> imagePaths;
+  List<String> videoPaths;
+
+  Property({
+    required this.id,
+    required this.name,
+    this.location = '',
+    this.address = '',
+    this.description = '',
+    this.email = '',
+    this.phone = '',
+    this.imagePaths = const [],
+    this.videoPaths = const [],
+  });
+}
+
+// ============================================================
 // OPENNEST SHARED DATA STORE
 // ============================================================
 
 class OpenNestStore {
+  // ============================================================
+  // PROPERTIES
+  // ============================================================
+
+  static final List<Property> properties = [
+    Property(
+      id: 'property_001',
+      name: 'Greenview Apartments',
+      location: 'Nairobi, Kenya',
+      address: 'Nairobi, Kenya',
+      description: 'A comfortable modern apartment with secure parking, reliable water and convenient access to nearby services.',
+      email: '',
+      phone: '',
+    ),
+  ];
+
   static final List<Apartment> apartments = [
     Apartment(
       number: 'A101',
+      propertyId: 'property_001',
       type: '2 Bedroom',
       rent: 'KSh 25000',
       tenant: 'John Kamau',
@@ -1194,6 +2936,7 @@ class OpenNestStore {
     ),
     Apartment(
       number: 'A102',
+      propertyId: 'property_001',
       type: '1 Bedroom',
       rent: 'KSh 18000',
       tenant: '',
@@ -1204,6 +2947,7 @@ class OpenNestStore {
     ),
     Apartment(
       number: 'A103',
+      propertyId: 'property_001',
       type: 'Bedsitter',
       rent: 'KSh 10000',
       tenant: '',
@@ -1371,6 +3115,7 @@ class Apartment {
   String status;
 
   // Property this unit belongs to
+  String propertyId;
   String propertyName;
 
   // Marketplace information
@@ -1389,6 +3134,7 @@ class Apartment {
     required this.rent,
     required this.tenant,
     required this.status,
+    this.propertyId = 'property_001',
     this.propertyName = 'Greenview Apartments',
     this.location = '',
     this.description = '',
@@ -3554,7 +5300,7 @@ class OpenNestWelcomePage extends StatelessWidget {
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const PublicUserPage()),
+                      MaterialPageRoute(builder: (_) => const ApartmentsPage()),
                     );
                   },
                 ),
@@ -3716,6 +5462,7 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
 
   final _propertyNameController = TextEditingController();
   final _locationController = TextEditingController();
@@ -3724,6 +5471,7 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
 
   bool _obscurePassword = true;
   bool _isCreating = false;
+  bool _acceptedTerms = false;
 
   @override
   void dispose() {
@@ -3731,6 +5479,7 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
     _phoneController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     _propertyNameController.dispose();
     _locationController.dispose();
     _unitsController.dispose();
@@ -3740,6 +5489,16 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
 
   Future<void> _createOwnerAccount() async {
     if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    if (!_acceptedTerms) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please accept the Terms & Conditions to continue.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
       return;
     }
 
@@ -3934,6 +5693,109 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
                   return 'Password must be at least 6 characters';
                 }
                 return null;
+              },
+            ),
+
+            _field(
+              controller: _confirmPasswordController,
+              label: 'Confirm Password',
+              hint: 'Re-enter your password',
+              icon: Icons.lock_reset_outlined,
+              obscureText: _obscurePassword,
+              suffixIcon: IconButton(
+                onPressed: () {
+                  setState(() {
+                    _obscurePassword = !_obscurePassword;
+                  });
+                },
+                icon: Icon(
+                  _obscurePassword
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                ),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Please confirm your password';
+                }
+
+                if (value != _passwordController.text) {
+                  return 'Passwords do not match';
+                }
+
+                return null;
+              },
+            ),
+
+            const SizedBox(height: 8),
+
+            StatefulBuilder(
+              builder: (context, setLocalState) {
+                return CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: _acceptedTerms,
+                  onChanged: (value) {
+                    setState(() {
+                      _acceptedTerms = value ?? false;
+                    });
+                  },
+                  title: Wrap(
+                    children: [
+                      const Text(
+                        'I agree to the ',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Color(0xFF263238),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () {
+                          showDialog(
+                            context: context,
+                            builder: (context) {
+                              return AlertDialog(
+                                title: const Text(
+                                  'Terms & Conditions',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF0B3D2E),
+                                  ),
+                                ),
+                                content: const SingleChildScrollView(
+                                  child: Text(
+                                    'By creating an OpenNest account, you agree to use the platform responsibly and provide accurate information. '
+                                    'You are responsible for keeping your account credentials secure. '
+                                    'Property information submitted to OpenNest should be accurate and up to date. '
+                                    'OpenNest reserves the right to review or remove information that violates the platform rules.',
+                                    style: TextStyle(fontSize: 14, height: 1.5),
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.pop(context);
+                                    },
+                                    child: const Text('Close'),
+                                  ),
+                                ],
+                              );
+                            },
+                          );
+                        },
+                        child: const Text(
+                          'Terms & Conditions',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Color(0xFF0B3D2E),
+                            fontWeight: FontWeight.bold,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
               },
             ),
 
@@ -5202,6 +7064,288 @@ class _OpenNestCreateNewPasswordPageState
                       'RESET PASSWORD',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ChatListScreen extends StatefulWidget {
+  const ChatListScreen({super.key});
+
+  @override
+  State<ChatListScreen> createState() => _ChatListScreenState();
+}
+
+class _ChatListScreenState extends State<ChatListScreen> {
+  final TextEditingController _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+
+  final List<Map<String, dynamic>> _messages = [];
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _sendMessage() {
+    final text = _messageController.text.trim();
+
+    if (text.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _messages.add({'text': text, 'isMe': true, 'time': DateTime.now()});
+    });
+
+    _messageController.clear();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F7F7),
+
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+
+        title: const Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: Color(0xFF1976D2),
+              child: Icon(Icons.support_agent, color: Colors.white, size: 20),
+            ),
+            SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Messages',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  'Support',
+                  style: TextStyle(fontSize: 12, color: Colors.green),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: _messages.isEmpty
+                  ? _buildEmptyState()
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+                      itemCount: _messages.length,
+                      itemBuilder: (context, index) {
+                        final message = _messages[index];
+
+                        return _buildMessage(
+                          message['text'] as String,
+                          message['isMe'] as bool,
+                          message['time'] as DateTime,
+                        );
+                      },
+                    ),
+            ),
+
+            _buildMessageInput(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(30),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.10),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.chat_bubble_outline,
+                size: 40,
+                color: Color(0xFF1976D2),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            const Text(
+              'Start a conversation',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+            ),
+
+            const SizedBox(height: 8),
+
+            const Text(
+              'Send a message to get started.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessage(String text, bool isMe, DateTime time) {
+    final timeString =
+        '${time.hour.toString().padLeft(2, '0')}:'
+        '${time.minute.toString().padLeft(2, '0')}';
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 300),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+        decoration: BoxDecoration(
+          color: isMe ? const Color(0xFF1976D2) : Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(18),
+            topRight: const Radius.circular(18),
+            bottomLeft: Radius.circular(isMe ? 18 : 4),
+            bottomRight: Radius.circular(isMe ? 4 : 18),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 5,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: isMe ? Colors.white : Colors.black87,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 4),
+
+            Text(
+              timeString,
+              style: TextStyle(
+                color: isMe ? Colors.white70 : Colors.grey,
+                fontSize: 10,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageInput() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _messageController,
+              minLines: 1,
+              maxLines: 5,
+              textInputAction: TextInputAction.newline,
+              decoration: InputDecoration(
+                hintText: 'Type a message...',
+                filled: true,
+                fillColor: const Color(0xFFF2F3F5),
+
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide.none,
+                ),
+
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide.none,
+                ),
+
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: const BorderSide(color: Color(0xFF1976D2)),
+                ),
+              ),
+
+              onSubmitted: (_) => _sendMessage(),
+            ),
+          ),
+
+          const SizedBox(width: 8),
+
+          Material(
+            color: const Color(0xFF1976D2),
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: _sendMessage,
+              child: const Padding(
+                padding: EdgeInsets.all(13),
+                child: Icon(Icons.send, color: Colors.white, size: 22),
+              ),
             ),
           ),
         ],
