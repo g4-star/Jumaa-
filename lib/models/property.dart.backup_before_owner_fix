@@ -1,0 +1,25 @@
+class Property {
+  String id;
+  String landlordId;
+  String name;
+  String location;
+  String address;
+  String description;
+  String email;
+  String phone;
+  List<String> imagePaths;
+  List<String> videoPaths;
+
+  Property({
+    required this.id,
+    required this.landlordId,
+    required this.name,
+    this.location = '',
+    this.address = '',
+    this.description = '',
+    this.email = '',
+    this.phone = '',
+    this.imagePaths = const [],
+    this.videoPaths = const [],
+  });
+}

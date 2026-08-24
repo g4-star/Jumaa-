@@ -1,0 +1,137 @@
+import 'dart:async';
+
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../models/message.dart';
+
+class ChatService {
+  final SupabaseClient supabase = Supabase.instance.client;
+
+  RealtimeChannel? _channel;
+
+  String get currentUserId {
+    final user = supabase.auth.currentUser;
+
+    if (user == null) {
+      throw Exception('User is not logged in');
+    }
+
+    return user.id;
+  }
+
+  Future<List<Message>> getMessages({
+    required String propertyId,
+    String? bookingRequestId,
+  }) async {
+    final List<dynamic> response;
+
+    if (bookingRequestId != null && bookingRequestId.isNotEmpty) {
+      response = await supabase
+          .from('chat_messages')
+          .select()
+          .eq('property_id', propertyId)
+          .eq('booking_request_id', bookingRequestId)
+          .order('created_at', ascending: true);
+    } else {
+      response = await supabase
+          .from('chat_messages')
+          .select()
+          .eq('property_id', propertyId)
+          .order('created_at', ascending: true);
+    }
+
+    return response
+        .map(
+          (row) => Message(
+            id: row['id'] as String,
+            conversationId:
+                (row['booking_request_id'] as String?) ?? propertyId,
+            senderId: row['sender_name'] as String,
+            content: row['message'] as String,
+            contentType: 'text',
+            createdAt: DateTime.parse(row['created_at'] as String),
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> sendMessage({
+    required String propertyId,
+    String? bookingRequestId,
+    required String senderType,
+    required String senderName,
+    String? senderEmail,
+    required String message,
+  }) async {
+    final text = message.trim();
+
+    if (text.isEmpty) {
+      return;
+    }
+
+    await supabase.from('chat_messages').insert({
+      'booking_request_id':
+          bookingRequestId != null && bookingRequestId.isNotEmpty
+          ? bookingRequestId
+          : null,
+      'property_id': propertyId,
+      'sender_type': senderType,
+      'sender_name': senderName,
+      'sender_email': senderEmail,
+      'message': text,
+    });
+  }
+
+  Stream<Message> subscribeToMessages({
+    required String propertyId,
+    String? bookingRequestId,
+  }) {
+    final controller = StreamController<Message>();
+
+    final channelName =
+        'chat_messages_${propertyId}_${bookingRequestId ?? 'property'}';
+
+    _channel = supabase
+        .channel(channelName)
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'chat_messages',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'property_id',
+            value: propertyId,
+          ),
+          callback: (payload) {
+            final row = payload.newRecord;
+
+            if (bookingRequestId != null &&
+                row['booking_request_id'] != bookingRequestId) {
+              return;
+            }
+
+            controller.add(
+              Message(
+                id: row['id'] as String,
+                conversationId:
+                    (row['booking_request_id'] as String?) ?? propertyId,
+                senderId: row['sender_name'] as String,
+                content: row['message'] as String,
+                contentType: 'text',
+                createdAt: DateTime.parse(row['created_at'] as String),
+              ),
+            );
+          },
+        )
+        .subscribe();
+
+    return controller.stream;
+  }
+
+  Future<void> dispose() async {
+    if (_channel != null) {
+      await supabase.removeChannel(_channel!);
+      _channel = null;
+    }
+  }
+}

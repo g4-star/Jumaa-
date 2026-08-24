@@ -1,0 +1,632 @@
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../models/landlord.dart';
+
+class LandlordBookingPage extends StatefulWidget {
+  final Landlord landlord;
+
+  const LandlordBookingPage({super.key, required this.landlord});
+
+  @override
+  State<LandlordBookingPage> createState() => _LandlordBookingPageState();
+}
+
+class _LandlordBookingPageState extends State<LandlordBookingPage> {
+  final SupabaseClient _supabase = Supabase.instance.client;
+
+  List<Map<String, dynamic>> _bookings = [];
+
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBookings();
+  }
+
+  Future<void> _loadBookings() async {
+    if (!mounted) return;
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+
+      if (userId == null) {
+        throw Exception('You must be logged in to view bookings.');
+      }
+
+      /*
+       * We first get the landlord's properties.
+       *
+       * The landlord model does not necessarily expose the Supabase
+       * property UUID, so we identify properties through owner_id.
+       */
+      final properties = await _supabase
+          .from('properties')
+          .select('id, name')
+          .eq('owner_id', userId);
+
+      if (properties.isEmpty) {
+        if (!mounted) return;
+
+        setState(() {
+          _bookings = [];
+          _loading = false;
+        });
+
+        return;
+      }
+
+      final propertyIds = properties
+          .map((row) => row['id'].toString())
+          .toList();
+
+      final response = await _supabase
+          .from('booking_requests')
+          .select('''
+            id,
+            property_id,
+            unit_id,
+            applicant_name,
+            applicant_email,
+            applicant_phone,
+            additional_notes,
+            status,
+            created_at,
+            updated_at
+          ''')
+          .inFilter('property_id', propertyIds)
+          .order('created_at', ascending: false);
+
+      if (!mounted) return;
+
+      setState(() {
+        _bookings = List<Map<String, dynamic>>.from(response);
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _updateBookingStatus(String bookingId, String status) async {
+    try {
+      await _supabase
+          .from('booking_requests')
+          .update({'status': status})
+          .eq('id', bookingId);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            status == 'approved' ? 'Booking approved.' : 'Booking rejected.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      await _loadBookings();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update booking: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _showBookingDetails(Map<String, dynamic> booking) async {
+    final status = booking['status']?.toString() ?? 'pending';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Container(
+          constraints: const BoxConstraints(maxHeight: 700),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+          decoration: BoxDecoration(
+            color: Theme.of(sheetContext).scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+          ),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 42,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade400,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  const Text(
+                    'Booking Request',
+                    style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  _detailRow(
+                    Icons.person_outline,
+                    'Applicant',
+                    booking['applicant_name']?.toString() ?? 'Not provided',
+                  ),
+
+                  _detailRow(
+                    Icons.email_outlined,
+                    'Email',
+                    booking['applicant_email']?.toString() ?? 'Not provided',
+                  ),
+
+                  _detailRow(
+                    Icons.phone_outlined,
+                    'Phone',
+                    booking['applicant_phone']?.toString() ?? 'Not provided',
+                  ),
+
+                  _detailRow(
+                    Icons.home_outlined,
+                    'Unit',
+                    booking['unit_id']?.toString() ?? 'Not provided',
+                  ),
+
+                  _detailRow(
+                    Icons.info_outline,
+                    'Status',
+                    status.toUpperCase(),
+                  ),
+
+                  if ((booking['additional_notes']?.toString() ?? '')
+                      .trim()
+                      .isNotEmpty)
+                    _detailRow(
+                      Icons.message_outlined,
+                      'Message',
+                      booking['additional_notes'].toString(),
+                    ),
+
+                  if (booking['created_at'] != null)
+                    _detailRow(
+                      Icons.access_time,
+                      'Submitted',
+                      _formatDate(booking['created_at'].toString()),
+                    ),
+
+                  const SizedBox(height: 20),
+
+                  if (status.toLowerCase() == 'pending')
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.pop(sheetContext);
+                              _updateBookingStatus(
+                                booking['id'].toString(),
+                                'rejected',
+                              );
+                            },
+                            icon: const Icon(Icons.close),
+                            label: const Text('REJECT'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                              padding: const EdgeInsets.symmetric(vertical: 15),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: () {
+                              Navigator.pop(sheetContext);
+                              _updateBookingStatus(
+                                booking['id'].toString(),
+                                'approved',
+                              );
+                            },
+                            icon: const Icon(Icons.check),
+                            label: const Text('APPROVE'),
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 15),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _detailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 15),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 21, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(String value) {
+    final date = DateTime.tryParse(value);
+
+    if (date == null) {
+      return value;
+    }
+
+    final local = date.toLocal();
+
+    return '${local.day.toString().padLeft(2, '0')}/'
+        '${local.month.toString().padLeft(2, '0')}/'
+        '${local.year} '
+        '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  Color _statusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Colors.green;
+      case 'rejected':
+        return Colors.red;
+      case 'cancelled':
+        return Colors.grey;
+      default:
+        return Colors.orange;
+    }
+  }
+
+  Widget _statusChip(String status) {
+    final color = _statusColor(status);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        status.toUpperCase(),
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  Widget _bookingCard(Map<String, dynamic> booking) {
+    final name = booking['applicant_name']?.toString().trim();
+
+    final displayName = name == null || name.isEmpty
+        ? 'Unknown applicant'
+        : name;
+
+    final status = booking['status']?.toString() ?? 'pending';
+
+    final message = booking['additional_notes']?.toString().trim() ?? '';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: Theme.of(context).dividerColor.withValues(alpha: 0.35),
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => _showBookingDetails(booking),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    child: Text(
+                      displayName.isNotEmpty
+                          ? displayName[0].toUpperCase()
+                          : '?',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          booking['applicant_email']?.toString() ?? '',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _statusChip(status),
+                ],
+              ),
+
+              const SizedBox(height: 15),
+
+              Row(
+                children: [
+                  const Icon(Icons.phone_outlined, size: 17),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      booking['applicant_phone']?.toString() ?? 'No phone',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              Row(
+                children: [
+                  const Icon(Icons.home_outlined, size: 17),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      'Unit: ${booking['unit_id']?.toString() ?? 'Unknown'}',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+
+              if (message.isNotEmpty) ...[
+                const SizedBox(height: 9),
+                Text(
+                  message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                ),
+              ],
+
+              const SizedBox(height: 12),
+
+              Row(
+                children: [
+                  if (booking['created_at'] != null)
+                    Expanded(
+                      child: Text(
+                        _formatDate(booking['created_at'].toString()),
+                        style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+
+                  if (status.toLowerCase() == 'pending') ...[
+                    TextButton(
+                      onPressed: () => _updateBookingStatus(
+                        booking['id'].toString(),
+                        'rejected',
+                      ),
+                      child: const Text(
+                        'Reject',
+                        style: TextStyle(color: Colors.red),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    FilledButton(
+                      onPressed: () => _updateBookingStatus(
+                        booking['id'].toString(),
+                        'approved',
+                      ),
+                      child: const Text('Approve'),
+                    ),
+                  ] else
+                    const Icon(Icons.chevron_right, color: Colors.grey),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final apartmentName = widget.landlord.apartmentName.trim();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Bookings',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: _loading ? null : _loadBookings,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _loadBookings,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 30),
+          children: [
+            Text(
+              apartmentName.isNotEmpty ? apartmentName : 'Your Apartment',
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+
+            const SizedBox(height: 6),
+
+            Text(
+              'Manage booking requests from prospective tenants.',
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+
+            const SizedBox(height: 20),
+
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.only(top: 80),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_error != null)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        size: 48,
+                        color: Colors.red,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Could not load bookings',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _error!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: _loadBookings,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('TRY AGAIN'),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else if (_bookings.isEmpty)
+              Card(
+                elevation: 0,
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.calendar_month_outlined,
+                        size: 55,
+                        color: Colors.grey.shade500,
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'No booking requests yet',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'New booking requests from users will appear here.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else ...[
+              Text(
+                '${_bookings.length} booking request${_bookings.length == 1 ? '' : 's'}',
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ..._bookings.map(_bookingCard),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,149 @@
+-- ============================================================
+-- JUMAA - FIX LANDLORD RLS
+-- Current architecture:
+-- auth.users -> landlords -> properties.landlord_id -> units
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- PROPERTIES
+-- ------------------------------------------------------------
+
+drop policy if exists "properties_select_own" on public.properties;
+drop policy if exists landlords_view_assigned_properties on public.properties;
+
+create policy "landlords_view_own_properties"
+on public.properties
+for select
+to authenticated
+using (
+  landlord_id = auth.uid()
+);
+
+create policy "landlords_insert_own_properties"
+on public.properties
+for insert
+to authenticated
+with check (
+  landlord_id = auth.uid()
+);
+
+create policy "landlords_update_own_properties"
+on public.properties
+for update
+to authenticated
+using (
+  landlord_id = auth.uid()
+)
+with check (
+  landlord_id = auth.uid()
+);
+
+create policy "landlords_delete_own_properties"
+on public.properties
+for delete
+to authenticated
+using (
+  landlord_id = auth.uid()
+);
+
+-- ------------------------------------------------------------
+-- UNITS
+-- ------------------------------------------------------------
+
+drop policy if exists "units_select_own" on public.units;
+drop policy if exists landlords_view_assigned_units on public.units;
+
+create policy "landlords_view_own_units"
+on public.units
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.properties p
+    where p.id = units.property_id
+      and p.landlord_id = auth.uid()
+  )
+);
+
+create policy "landlords_insert_own_units"
+on public.units
+for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.properties p
+    where p.id = units.property_id
+      and p.landlord_id = auth.uid()
+  )
+);
+
+create policy "landlords_update_own_units"
+on public.units
+for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.properties p
+    where p.id = units.property_id
+      and p.landlord_id = auth.uid()
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.properties p
+    where p.id = units.property_id
+      and p.landlord_id = auth.uid()
+  )
+);
+
+create policy "landlords_delete_own_units"
+on public.units
+for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.properties p
+    where p.id = units.property_id
+      and p.landlord_id = auth.uid()
+  )
+);
+
+-- ------------------------------------------------------------
+-- LANDLORDS
+-- ------------------------------------------------------------
+
+alter table public.landlords enable row level security;
+
+drop policy if exists landlords_select_own on public.landlords;
+
+create policy "landlords_select_own"
+on public.landlords
+for select
+to authenticated
+using (
+  id = auth.uid()
+);
+
+create policy "landlords_insert_own"
+on public.landlords
+for insert
+to authenticated
+with check (
+  id = auth.uid()
+);
+
+create policy "landlords_update_own"
+on public.landlords
+for update
+to authenticated
+using (
+  id = auth.uid()
+)
+with check (
+  id = auth.uid()
+);

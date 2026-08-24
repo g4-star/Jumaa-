@@ -1,0 +1,63 @@
+import 'package:flutter/material.dart';
+
+import '../../models/landlord.dart';
+
+class LandlordBookingPage extends StatelessWidget {
+  final Landlord landlord;
+
+  const LandlordBookingPage({super.key, required this.landlord});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Bookings',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(18),
+        children: [
+          Text(
+            landlord.apartmentName.isNotEmpty
+                ? landlord.apartmentName
+                : 'Your Apartment',
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Booking requests will appear here.',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 24),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.calendar_month_outlined,
+                    size: 55,
+                    color: Colors.grey.shade500,
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'No booking requests yet',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'New booking requests from users will appear here.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

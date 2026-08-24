@@ -1,0 +1,71 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+class BookingService {
+  final SupabaseClient supabase = Supabase.instance.client;
+
+  String? get currentUserId => supabase.auth.currentUser?.id;
+
+  // ============================================================
+  // CREATE BOOKING
+  // ============================================================
+
+  Future<String> createBooking({
+    required String propertyId,
+    required String unitId,
+    required String fullName,
+    required String email,
+    required String phone,
+    String? message,
+  }) async {
+    final response = await supabase
+        .from('bookings')
+        .insert({
+          'property_id': propertyId,
+          'unit_id': unitId,
+          'applicant_id': currentUserId,
+          'full_name': fullName.trim(),
+          'email': email.trim(),
+          'phone': phone.trim(),
+          'message': message?.trim().isEmpty == true ? null : message?.trim(),
+          'status': 'pending',
+        })
+        .select('id')
+        .single();
+
+    return response['id'].toString();
+  }
+
+  // ============================================================
+  // GET MY BOOKINGS
+  // ============================================================
+
+  Future<List<Map<String, dynamic>>> getMyBookings() async {
+    final userId = currentUserId;
+
+    if (userId == null) {
+      return [];
+    }
+
+    final response = await supabase
+        .from('bookings')
+        .select()
+        .eq('applicant_id', userId)
+        .order('created_at', ascending: false);
+
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  // ============================================================
+  // CANCEL BOOKING
+  // ============================================================
+
+  Future<void> cancelBooking(String bookingId) async {
+    await supabase
+        .from('bookings')
+        .update({
+          'status': 'cancelled',
+          'updated_at': DateTime.now().toIso8601String(),
+        })
+        .eq('id', bookingId);
+  }
+}

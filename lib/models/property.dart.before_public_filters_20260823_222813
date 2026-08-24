@@ -1,0 +1,35 @@
+class Property {
+  String id;
+  String ownerId;
+  String name;
+  String location;
+  String address;
+  String description;
+  String email;
+  String phone;
+  String paymentMethod;
+  String mpesaTillNumber;
+  String mpesaPaybillNumber;
+  String mpesaAccountNumber;
+  bool paymentsEnabled;
+  List<String> imagePaths;
+  List<String> videoPaths;
+
+  Property({
+    required this.id,
+    required this.ownerId,
+    required this.name,
+    this.location = '',
+    this.address = '',
+    this.description = '',
+    this.email = '',
+    this.phone = '',
+    this.paymentMethod = 'till',
+    this.mpesaTillNumber = '',
+    this.mpesaPaybillNumber = '',
+    this.mpesaAccountNumber = '',
+    this.paymentsEnabled = true,
+    this.imagePaths = const [],
+    this.videoPaths = const [],
+  });
+}
