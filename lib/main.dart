@@ -4793,7 +4793,7 @@ class OpenNestStore {
       loadedProperties.add(
         Property(
           id: row['id']?.toString() ?? '',
-          ownerId: row['landlord_id']?.toString() ?? '',
+          ownerId: row['owner_id']?.toString() ?? row['landlord_id']?.toString() ?? '',
           name: row['name']?.toString() ?? '',
           county: row['county']?.toString() ?? '',
           subcounty: row['subcounty']?.toString() ?? '',
