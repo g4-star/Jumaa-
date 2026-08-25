@@ -3064,927 +3064,6 @@ class _ManageApartmentsPageState extends State<ManageApartmentsPage> {
   }
 
   Widget _propertyCard(Property property) {
-    final units = _unitsForProperty(property.id);
-    final vacant = units.where((unit) => unit.status == 'Vacant').length;
-    final occupied = units.where((unit) => unit.status == 'Occupied').length;
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => _openProperty(property),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary
-                          .withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Icon(Icons.apartment_outlined),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          property.name,
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        if (property.location.trim().isNotEmpty)
-                          Text(
-                            property.location,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.grey),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const Icon(Icons.chevron_right),
-                ],
-              ),
-
-              const SizedBox(height: 14),
-
-              Row(
-                children: [
-                  _statusChip('${units.length} units', Icons.home_outlined),
-                  const SizedBox(width: 8),
-                  _statusChip('$vacant vacant', Icons.check_circle_outline),
-                  const SizedBox(width: 8),
-                  _statusChip('$occupied occupied', Icons.person_outline),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _statusChip(String text, IconData icon) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest
-              .withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(9),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 14),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                text,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class ManagePropertyPage extends StatefulWidget {
-  final Property property;
-
-  const ManagePropertyPage({super.key, required this.property});
-
-  @override
-  State<ManagePropertyPage> createState() => _ManagePropertyPageState();
-}
-
-class _ManagePropertyPageState extends State<ManagePropertyPage> {
-  List<Apartment> get _units => OpenNestStore.apartments
-      .where((unit) => unit.propertyId == widget.property.id)
-      .toList();
-
-  @override
-  Widget build(BuildContext context) {
-    final property = widget.property;
-    final units = _units;
-
-    final vacant = units.where((unit) => unit.status == 'Vacant').length;
-    final occupied = units.where((unit) => unit.status == 'Occupied').length;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          property.name,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            elevation: 0,
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    property.name,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (property.location.trim().isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      property.location,
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                  ],
-                  if (property.address.trim().isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      property.address,
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                  ],
-                  if (property.description.trim().isNotEmpty) ...[
-                    const SizedBox(height: 14),
-                    Text(
-                      property.description,
-                      style: const TextStyle(height: 1.4),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          Row(
-            children: [
-              Expanded(
-                child: _metric(
-                  'Total',
-                  units.length.toString(),
-                  Icons.home_outlined,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _metric(
-                  'Vacant',
-                  vacant.toString(),
-                  Icons.check_circle_outline,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _metric(
-                  'Occupied',
-                  occupied.toString(),
-                  Icons.person_outline,
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 22),
-
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Units',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              FilledButton.icon(
-                onPressed: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          OwnerUnitsManagementPage(property: widget.property),
-                    ),
-                  );
-
-                  if (mounted) {
-                    setState(() {});
-                  }
-                },
-                icon: const Icon(Icons.add),
-                label: const Text('Add Unit'),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 12),
-
-          if (units.isEmpty)
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(22),
-                child: Text(
-                  'No units have been added to this property yet.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            )
-          else
-            ...units.map(_unitTile),
-        ],
-      ),
-    );
-  }
-
-  Widget _metric(String title, String value, IconData icon) {
-    return Card(
-      elevation: 0,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Column(
-          children: [
-            Icon(icon),
-            const SizedBox(height: 5),
-            Text(
-              value,
-              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _unitTile(Apartment unit) {
-    final available = unit.status == 'Vacant';
-
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        onTap: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => OwnerEditUnitPage(unit: unit)),
-          );
-
-          if (mounted) {
-            setState(() {});
-          }
-        },
-        leading: CircleAvatar(
-          child: Text(
-            unit.number.length > 3
-                ? unit.number.substring(unit.number.length - 3)
-                : unit.number,
-            style: const TextStyle(fontSize: 11),
-          ),
-        ),
-        title: Text(
-          unit.number,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Text('${unit.type} • ${unit.rent}'),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(available ? Icons.check_circle_outline : Icons.person_outline),
-            const SizedBox(width: 5),
-            const Icon(Icons.chevron_right),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class ApartmentsPage extends StatefulWidget {
-  const ApartmentsPage({super.key});
-
-  @override
-  State<ApartmentsPage> createState() => _ApartmentsPageState();
-}
-
-class _ApartmentsPageState extends State<ApartmentsPage> {
-  String searchQuery = '';
-
-  String? selectedCounty;
-  String? selectedSubcounty;
-  String? selectedHouseType;
-
-  double? minimumRent;
-  double? maximumRent;
-
-  List<Property> get properties => OpenNestStore.properties;
-
-  List<Apartment> get apartments => OpenNestStore.apartments;
-
-  List<Apartment> unitsForProperty(String propertyId) {
-    return apartments.where((unit) => unit.propertyId == propertyId).toList();
-  }
-
-  Property? propertyById(String propertyId) {
-    for (final property in properties) {
-      if (property.id == propertyId) {
-        return property;
-      }
-    }
-
-    return null;
-  }
-
-  List<String> propertyImages(String propertyId) {
-    final property = propertyById(propertyId);
-
-    if (property == null) {
-      return [];
-    }
-
-    return property.imagePaths.toSet().toList();
-  }
-
-  String propertyLocation(Property property) {
-    final parts = <String>[];
-
-    if (property.location.trim().isNotEmpty) {
-      parts.add(property.location.trim());
-    }
-
-    if (property.subcounty.trim().isNotEmpty &&
-        !parts.contains(property.subcounty.trim())) {
-      parts.add(property.subcounty.trim());
-    }
-
-    if (property.county.trim().isNotEmpty &&
-        !parts.contains(property.county.trim())) {
-      parts.add(property.county.trim());
-    }
-
-    if (parts.isEmpty && property.address.trim().isNotEmpty) {
-      return property.address.trim();
-    }
-
-    return parts.isEmpty ? 'Location not provided' : parts.join(', ');
-  }
-
-  String propertyDescription(Property property) {
-    if (property.description.trim().isEmpty) {
-      return 'Comfortable living spaces with convenient access to the surrounding area.';
-    }
-
-    return property.description.trim();
-  }
-
-  List<String> get availableCounties {
-    final values = properties
-        .map((property) => property.county.trim())
-        .where((value) => value.isNotEmpty)
-        .toSet()
-        .toList();
-
-    values.sort();
-    return values;
-  }
-
-  List<String> get availableSubcounties {
-    final values = properties
-        .where(
-          (property) =>
-              selectedCounty == null ||
-              selectedCounty!.isEmpty ||
-              property.county.trim().toLowerCase() ==
-                  selectedCounty!.trim().toLowerCase(),
-        )
-        .map((property) => property.subcounty.trim())
-        .where((value) => value.isNotEmpty)
-        .toSet()
-        .toList();
-
-    values.sort();
-    return values;
-  }
-
-  List<String> get availableHouseTypes {
-    final values = <String>{};
-
-    for (final unit in apartments) {
-      if (unit.type.trim().isNotEmpty) {
-        values.add(unit.type.trim());
-      }
-    }
-
-    return values.toList()..sort();
-  }
-
-  double _rentValue(String value) {
-    final cleaned = value.replaceAll(RegExp(r'[^0-9.]'), '');
-    return double.tryParse(cleaned) ?? 0;
-  }
-
-  bool _propertyMatches(Property property) {
-    final query = searchQuery.trim().toLowerCase();
-
-    if (query.isNotEmpty) {
-      final searchable = [
-        property.name,
-        property.location,
-        property.address,
-        property.county,
-        property.subcounty,
-        property.description,
-      ].join(' ').toLowerCase();
-
-      if (!searchable.contains(query)) {
-        return false;
-      }
-    }
-
-    if (selectedCounty != null &&
-        selectedCounty!.isNotEmpty &&
-        property.county.trim().toLowerCase() !=
-            selectedCounty!.trim().toLowerCase()) {
-      return false;
-    }
-
-    if (selectedSubcounty != null &&
-        selectedSubcounty!.isNotEmpty &&
-        property.subcounty.trim().toLowerCase() !=
-            selectedSubcounty!.trim().toLowerCase()) {
-      return false;
-    }
-
-    final units = unitsForProperty(property.id);
-
-    if (selectedHouseType != null && selectedHouseType!.isNotEmpty) {
-      final matchingType = units.any(
-        (unit) =>
-            unit.type.trim().toLowerCase() ==
-            selectedHouseType!.trim().toLowerCase(),
-      );
-
-      if (!matchingType) {
-        return false;
-      }
-    }
-
-    if (minimumRent != null || maximumRent != null) {
-      final hasMatchingRent = units.any((unit) {
-        final rent = _rentValue(unit.rent);
-
-        if (minimumRent != null && rent < minimumRent!) {
-          return false;
-        }
-
-        if (maximumRent != null && rent > maximumRent!) {
-          return false;
-        }
-
-        return true;
-      });
-
-      if (!hasMatchingRent) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  List<Property> get filteredProperties {
-    return properties.where(_propertyMatches).toList();
-  }
-
-  int availableUnits(Property property) {
-    return unitsForProperty(property.id)
-        .where((unit) => unit.status.toLowerCase() == 'vacant')
-        .length;
-  }
-
-  void _clearFilters() {
-    setState(() {
-      selectedCounty = null;
-      selectedSubcounty = null;
-      selectedHouseType = null;
-      minimumRent = null;
-      maximumRent = null;
-    });
-  }
-
-  bool get hasFilters {
-    return selectedCounty != null ||
-        selectedSubcounty != null ||
-        selectedHouseType != null ||
-        minimumRent != null ||
-        maximumRent != null;
-  }
-
-  Future<void> _openFilters() async {
-    String? tempCounty = selectedCounty;
-    String? tempSubcounty = selectedSubcounty;
-    String? tempHouseType = selectedHouseType;
-
-    final minController = TextEditingController(
-      text: minimumRent?.toStringAsFixed(0) ?? '',
-    );
-
-    final maxController = TextEditingController(
-      text: maximumRent?.toStringAsFixed(0) ?? '',
-    );
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final subcounties =
-                properties
-                    .where(
-                      (property) =>
-                          tempCounty == null ||
-                          tempCounty!.isEmpty ||
-                          property.county.trim().toLowerCase() ==
-                              tempCounty!.trim().toLowerCase(),
-                    )
-                    .map((property) => property.subcounty.trim())
-                    .where((value) => value.isNotEmpty)
-                    .toSet()
-                    .toList()
-                  ..sort();
-
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
-              ),
-              child: Container(
-                constraints: const BoxConstraints(maxHeight: 720),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).scaffoldBackgroundColor,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(28),
-                  ),
-                ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 42,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade400,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 22),
-
-                      Row(
-                        children: [
-                          const Expanded(
-                            child: Text(
-                              'Filter Apartments',
-                              style: TextStyle(
-                                fontSize: 23,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          if (hasFilters)
-                            TextButton(
-                              onPressed: () {
-                                setSheetState(() {
-                                  tempCounty = null;
-                                  tempSubcounty = null;
-                                  tempHouseType = null;
-                                  minController.clear();
-                                  maxController.clear();
-                                });
-                              },
-                              child: const Text('Reset'),
-                            ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      DropdownButtonFormField<String>(
-                        initialValue: tempCounty,
-                        decoration: const InputDecoration(
-                          labelText: 'County',
-                          prefixIcon: Icon(Icons.location_city_outlined),
-                          border: OutlineInputBorder(),
-                        ),
-                        items: availableCounties
-                            .map(
-                              (county) => DropdownMenuItem(
-                                value: county,
-                                child: Text(county),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          setSheetState(() {
-                            tempCounty = value;
-                            tempSubcounty = null;
-                          });
-                        },
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      DropdownButtonFormField<String>(
-                        initialValue: tempSubcounty,
-                        decoration: const InputDecoration(
-                          labelText: 'Subcounty / Area',
-                          prefixIcon: Icon(Icons.map_outlined),
-                          border: OutlineInputBorder(),
-                        ),
-                        items: subcounties
-                            .map(
-                              (area) => DropdownMenuItem(
-                                value: area,
-                                child: Text(area),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          setSheetState(() {
-                            tempSubcounty = value;
-                          });
-                        },
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      DropdownButtonFormField<String>(
-                        initialValue: tempHouseType,
-                        decoration: const InputDecoration(
-                          labelText: 'House Type',
-                          prefixIcon: Icon(Icons.home_work_outlined),
-                          border: OutlineInputBorder(),
-                        ),
-                        items: availableHouseTypes
-                            .map(
-                              (type) => DropdownMenuItem(
-                                value: type,
-                                child: Text(type),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          setSheetState(() {
-                            tempHouseType = value;
-                          });
-                        },
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: minController,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Min rent',
-                                prefixText: 'KSh ',
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: maxController,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Max rent',
-                                prefixText: 'KSh ',
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 22),
-
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: FilledButton.icon(
-                          onPressed: () {
-                            final min = double.tryParse(
-                              minController.text.trim(),
-                            );
-
-                            final max = double.tryParse(
-                              maxController.text.trim(),
-                            );
-
-                            setState(() {
-                              selectedCounty = tempCounty;
-                              selectedSubcounty = tempSubcounty;
-                              selectedHouseType = tempHouseType;
-                              minimumRent = min;
-                              maximumRent = max;
-                            });
-
-                            Navigator.pop(sheetContext);
-                          },
-                          icon: const Icon(Icons.check_rounded),
-                          label: const Text(
-                            'APPLY FILTERS',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    minController.dispose();
-    maxController.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final results = filteredProperties;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Find an Apartment',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-            child: TextField(
-              onChanged: (value) {
-                setState(() {
-                  searchQuery = value;
-                });
-              },
-              decoration: InputDecoration(
-                hintText: 'Search apartment or location...',
-                prefixIcon: const Icon(Icons.search_rounded),
-                suffixIcon: searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded),
-                        onPressed: () {
-                          setState(() {
-                            searchQuery = '';
-                          });
-                        },
-                      )
-                    : null,
-                filled: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-          ),
-
-          // ACTIVE FILTERS
-          if (hasFilters)
-            SizedBox(
-              height: 42,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: [
-                  if (selectedCounty != null)
-                    _filterChip(Icons.location_city_outlined, selectedCounty!),
-                  if (selectedSubcounty != null)
-                    _filterChip(Icons.map_outlined, selectedSubcounty!),
-                  if (selectedHouseType != null)
-                    _filterChip(Icons.home_work_outlined, selectedHouseType!),
-                  if (minimumRent != null || maximumRent != null)
-                    _filterChip(Icons.payments_outlined, _rentFilterLabel()),
-                  ActionChip(
-                    label: const Text('Clear'),
-                    avatar: const Icon(Icons.close, size: 17),
-                    onPressed: _clearFilters,
-                  ),
-                ],
-              ),
-            ),
-
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: Row(
-              children: [
-                Text(
-                  '${results.length} apartments',
-                  style: TextStyle(
-                    color: Colors.grey.shade700,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const Spacer(),
-                if (hasFilters)
-                  Text(
-                    'Filters active',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          Expanded(
-            child: results.isEmpty
-                ? _emptyState()
-                : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
-                    itemCount: results.length,
-                    itemBuilder: (context, index) {
-                      return _propertyCard(results[index]);
-                    },
-                  ),
-          ),
-        ],
-      ),
-
-      // YOUR REQUESTED FILTER BUTTON AT THE BOTTOM
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-        child: SizedBox(
-          height: 52,
-          child: FilledButton.icon(
-            onPressed: _openFilters,
-            icon: const Icon(Icons.tune_rounded),
-            label: Text(
-              hasFilters ? 'FILTERS ACTIVE' : 'FILTER APARTMENTS',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _rentFilterLabel() {
-    if (minimumRent != null && maximumRent != null) {
-      return 'KSh ${minimumRent!.toStringAsFixed(0)} - ${maximumRent!.toStringAsFixed(0)}';
-    }
-
-    if (minimumRent != null) {
-      return 'From KSh ${minimumRent!.toStringAsFixed(0)}';
-    }
-
-    return 'Up to KSh ${maximumRent!.toStringAsFixed(0)}';
-  }
-
-  Widget _filterChip(IconData icon, String label) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: Chip(avatar: Icon(icon, size: 16), label: Text(label)),
-    );
-  }
-
-  Widget _propertyCard(Property property) {
     final units = unitsForProperty(property.id);
     final available = availableUnits(property);
     final images = propertyImages(property.id);
@@ -3993,173 +3072,200 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
     final surface = Theme.of(context).colorScheme.surface;
 
     return Card(
-      elevation: 1,
-      margin: const EdgeInsets.only(bottom: 6),
+      elevation: 3,
+      margin: const EdgeInsets.only(bottom: 14),
       clipBehavior: Clip.antiAlias,
       color: surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: primary.withValues(alpha: 0.08)),
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: primary.withValues(alpha: 0.12)),
       ),
       child: InkWell(
         onTap: () => _showPropertyDetails(property),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: 105,
-              height: 118,
-              child: _propertyImage(property, images),
+            // APARTMENT PHOTO
+            Stack(
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  height: 190,
+                  child: _propertyImage(property, images),
+                ),
+
+                // AVAILABLE BADGE
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade700,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '$available available',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
 
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(9, 7, 8, 7),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      property.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: primary,
-                      ),
+            // APARTMENT DETAILS
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    property.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: primary,
                     ),
+                  ),
 
-                    const SizedBox(height: 2),
+                  const SizedBox(height: 6),
 
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.location_on_rounded,
-                          size: 12,
-                          color: primary.withValues(alpha: 0.75),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.location_on_rounded, size: 17, color: primary),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          propertyLocation(property),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            color: Colors.black87,
+                            height: 1.3,
+                          ),
                         ),
-                        const SizedBox(width: 2),
-                        Expanded(
-                          child: Text(
-                            propertyLocation(property),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 9.5,
-                              color: Colors.black54,
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Text(
+                    propertyDescription(property),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black54,
+                      height: 1.35,
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: primary.withValues(alpha: 0.09),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.apartment_rounded,
+                              size: 16,
+                              color: primary,
                             ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 3),
-
-                    Text(
-                      propertyDescription(property),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 9.5,
-                        color: Colors.black45,
-                      ),
-                    ),
-
-                    const SizedBox(height: 5),
-
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: primary.withValues(alpha: 0.09),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.apartment_rounded,
-                                size: 11,
+                            const SizedBox(width: 5),
+                            Text(
+                              '${units.length} units',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
                                 color: primary,
                               ),
-                              const SizedBox(width: 2),
-                              Text(
-                                '${units.length}',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  color: primary,
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
+                      ),
 
-                        const SizedBox(width: 4),
+                      const SizedBox(width: 8),
 
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.green.withValues(alpha: 0.10),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.check_circle_rounded,
-                                size: 11,
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.check_circle_rounded,
+                              size: 16,
+                              color: Colors.green,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              '$available available',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
                                 color: Colors.green,
                               ),
-                              const SizedBox(width: 2),
-                              Text(
-                                '$available available',
-                                style: const TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.green,
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
+                  ),
 
-                    const SizedBox(height: 5),
+                  const SizedBox(height: 13),
 
-                    SizedBox(
-                      height: 25,
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: () => _showPropertyDetails(property),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: primary,
-                          padding: EdgeInsets.zero,
-                          visualDensity: VisualDensity.compact,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(7),
-                          ),
+                  SizedBox(
+                    height: 44,
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () => _showPropertyDetails(property),
+                      icon: const Icon(Icons.visibility_rounded, size: 18),
+                      label: const Text(
+                        'VIEW APARTMENT',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.3,
                         ),
-                        child: const Text(
-                          'VIEW APARTMENT',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                          ),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
