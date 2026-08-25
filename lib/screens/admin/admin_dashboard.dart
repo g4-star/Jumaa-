@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/apartment.dart';
 import '../../models/property.dart';
 import '../../models/landlord.dart';
+import '../../main.dart' show OpenNestStore;
 
 class AdminDashboardPage extends StatefulWidget {
   const AdminDashboardPage({
@@ -73,7 +74,19 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () async {
-            setState(() {});
+            try {
+              await Future.wait([
+                OpenNestStore.loadPropertiesFromSupabase(),
+                OpenNestStore.loadUnitsFromSupabase(),
+                OpenNestStore.loadLandlords(),
+              ]);
+            } catch (e) {
+              debugPrint('Admin dashboard refresh failed: $e');
+            }
+
+            if (mounted) {
+              setState(() {});
+            }
           },
           child: ListView(
             padding: const EdgeInsets.all(18),

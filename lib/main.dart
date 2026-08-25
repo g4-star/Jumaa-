@@ -278,6 +278,35 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   int currentIndex = 0;
+  bool _loadingDashboardData = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _reloadDashboardData();
+  }
+
+  Future<void> _reloadDashboardData() async {
+    if (_loadingDashboardData) return;
+
+    _loadingDashboardData = true;
+
+    try {
+      await Future.wait([
+        OpenNestStore.loadPropertiesFromSupabase(),
+        OpenNestStore.loadUnitsFromSupabase(),
+        OpenNestStore.loadLandlords(),
+      ]);
+    } catch (e) {
+      debugPrint('Dashboard data reload failed: $e');
+    } finally {
+      _loadingDashboardData = false;
+
+      if (mounted) {
+        setState(() {});
+      }
+    }
+  }
 
   List<Widget> get pages => [
     AdminDashboardPage(
@@ -3998,89 +4027,179 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
     final available = availableUnits(property);
     final images = propertyImages(property.id);
 
+    final primary = Theme.of(context).colorScheme.primary;
+    final surface = Theme.of(context).colorScheme.surface;
+
     return Card(
       elevation: 1,
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 6),
       clipBehavior: Clip.antiAlias,
+      color: surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: primary.withValues(alpha: 0.08),
+        ),
+      ),
       child: InkWell(
         onTap: () => _showPropertyDetails(property),
-        child: Column(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _propertyImage(property, images),
+            SizedBox(
+              width: 105,
+              height: 118,
+              child: _propertyImage(property, images),
+            ),
 
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    property.name,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-
-                  const SizedBox(height: 7),
-
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(
-                        Icons.location_on_outlined,
-                        size: 18,
-                        color: Colors.grey,
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(9, 7, 8, 7),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      property.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: primary,
                       ),
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Text(
-                          propertyLocation(property),
-                          style: const TextStyle(
-                            color: Colors.black54,
-                            height: 1.3,
+                    ),
+
+                    const SizedBox(height: 2),
+
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.location_on_rounded,
+                          size: 12,
+                          color: primary.withValues(alpha: 0.75),
+                        ),
+                        const SizedBox(width: 2),
+                        Expanded(
+                          child: Text(
+                            propertyLocation(property),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 9.5,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 3),
+
+                    Text(
+                      propertyDescription(property),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 9.5,
+                        color: Colors.black45,
+                      ),
+                    ),
+
+                    const SizedBox(height: 5),
+
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: primary.withValues(alpha: 0.09),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.apartment_rounded,
+                                size: 11,
+                                color: primary,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                '${units.length}',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(width: 4),
+
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.check_circle_rounded,
+                                size: 11,
+                                color: Colors.green,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                '$available available',
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.green,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 5),
+
+                    SizedBox(
+                      height: 25,
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () => _showPropertyDetails(property),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: primary,
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                        ),
+                        child: const Text(
+                          'VIEW APARTMENT',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  Text(
-                    propertyDescription(property),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.black54, height: 1.4),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _infoPill(
-                        Icons.apartment_outlined,
-                        '${units.length} units',
-                      ),
-                      _infoPill(
-                        Icons.check_circle_outline,
-                        '$available available',
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 15),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: () => _showPropertyDetails(property),
-                      child: const Text('VIEW APARTMENT'),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -4105,27 +4224,6 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
         errorBuilder: (_, _, _) {
           return _propertyPlaceholder();
         },
-      ),
-    );
-  }
-
-  Widget _infoPill(IconData icon, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(width: 5),
-          Text(
-            text,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          ),
-        ],
       ),
     );
   }
@@ -6301,6 +6399,8 @@ class LandlordDashboardPage extends StatefulWidget {
 }
 
 class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
+  bool _loadingDashboardData = false;
+
   List<Apartment> get assignedApartments {
     // Prefer the landlord's property ID when available.
     if (widget.landlord.apartmentId.isNotEmpty) {
@@ -6341,6 +6441,30 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
   int get maintenanceCount =>
       assignedApartments.where((a) => a.status == 'Under Maintenance').length;
 
+  Future<void> _reloadDashboardData() async {
+    if (_loadingDashboardData) return;
+
+    setState(() {
+      _loadingDashboardData = true;
+    });
+
+    try {
+      await Future.wait([
+        OpenNestStore.loadPropertiesFromSupabase(),
+        OpenNestStore.loadUnitsFromSupabase(),
+        OpenNestStore.loadLandlords(),
+      ]);
+    } catch (e) {
+      debugPrint('LANDLORD DASHBOARD RELOAD ERROR: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingDashboardData = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final apartments = assignedApartments;
@@ -6361,7 +6485,7 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () async {
-            setState(() {});
+            await _reloadDashboardData();
           },
           child: ListView(
             padding: const EdgeInsets.all(18),
@@ -7927,9 +8051,11 @@ class JUMAAWelcomePage extends StatefulWidget {
 class _JUMAAWelcomePageState extends State<JUMAAWelcomePage> {
   final List<String> _houseImages = const [
     'assets/houses/house1.jpg',
-    'assets/houses/house2.jpeg',
+    'assets/houses/house2.jpg',
+    'assets/houses/house3.jpg',
     'assets/houses/house4.jpg',
-    'assets/houses/house5.jpeg',
+    'assets/houses/house5.jpg',
+    'assets/houses/house6.jpg',
   ];
 
   int _imageIndex = 0;
@@ -8171,9 +8297,11 @@ class JUMAAEntryPage extends StatefulWidget {
 class _JUMAAEntryPageState extends State<JUMAAEntryPage> {
   final List<String> _houseImages = const [
     'assets/houses/house1.jpg',
-    'assets/houses/house2.jpeg',
+    'assets/houses/house2.jpg',
+    'assets/houses/house3.jpg',
     'assets/houses/house4.jpg',
-    'assets/houses/house5.jpeg',
+    'assets/houses/house5.jpg',
+    'assets/houses/house6.jpg',
   ];
 
   String _backgroundImage = '';
