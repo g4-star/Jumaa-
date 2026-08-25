@@ -11211,6 +11211,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
           TextField(
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,
+            style: const TextStyle(color: Colors.black, fontSize: 16),
             decoration: InputDecoration(
               labelText: 'Email',
               prefixIcon: const Icon(Icons.email_outlined),
@@ -11228,6 +11229,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
           TextField(
             controller: _passwordController,
             obscureText: _obscurePassword,
+            style: const TextStyle(color: Colors.black, fontSize: 16),
             decoration: InputDecoration(
               labelText: 'Password',
               prefixIcon: const Icon(Icons.lock_outline),
@@ -11422,6 +11424,7 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
           TextField(
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,
+            style: const TextStyle(color: Colors.black, fontSize: 16),
             decoration: InputDecoration(
               labelText: 'Email address',
               prefixIcon: const Icon(Icons.email_outlined),
@@ -11600,6 +11603,13 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
             keyboardType: TextInputType.number,
             maxLength: 5,
             textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.black,
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 3,
+            ),
+            cursorColor: const Color(0xFF0B3D2E),
             decoration: InputDecoration(
               labelText: 'Enter verification code',
               prefixIcon: const Icon(Icons.pin_outlined),
@@ -11765,6 +11775,8 @@ class _JUMAACreateNewPasswordPageState
           TextField(
             controller: _passwordController,
             obscureText: _obscurePassword,
+            style: const TextStyle(color: Colors.black, fontSize: 16),
+            cursorColor: const Color(0xFF0B3D2E),
             decoration: InputDecoration(
               labelText: 'New password',
               prefixIcon: const Icon(Icons.lock_outline),
