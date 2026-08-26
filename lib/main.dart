@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'models/owner.dart';
 import 'models/property.dart';
@@ -14,7 +17,152 @@ import 'models/apartment.dart';
 import 'models/landlord.dart';
 import 'models/tenant.dart';
 import 'screens/admin/admin_dashboard.dart';
+import 'screens/landlord/landlord_dashboard.dart';
 import 'services/booking_service.dart';
+
+// ============================================================
+// JUMAA EMAIL SERVICE
+// ============================================================
+
+class JumaaEmailService {
+  static const String _functionUrl =
+      'https://pdezijwjfqyulkkuhoun.supabase.co/functions/v1/send-email';
+
+  static Future<bool> sendEmail({
+    required String to,
+    required String subject,
+    required String html,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse(_functionUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'to': to.trim(), 'subject': subject, 'html': html}),
+      );
+
+      debugPrint(
+        'JUMAA EMAIL: status=${response.statusCode} body=${response.body}',
+      );
+
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (e) {
+      debugPrint('JUMAA EMAIL ERROR: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> sendLandlordInvitation({
+    required String name,
+    required String email,
+    required String landlordId,
+    required String phone,
+    required String temporaryPassword,
+    required String apartmentName,
+  }) {
+    return sendEmail(
+      to: email,
+      subject: 'Welcome to JUMAA - Your Landlord Account',
+      html:
+          '''
+<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;background:#f5f7f6;padding:24px;">
+  <div style="max-width:600px;margin:auto;background:#ffffff;padding:30px;border-radius:14px;">
+    <h2 style="color:#0B3D2E;">Welcome to JUMAA</h2>
+
+    <p>Hello <strong>${_escape(name)}</strong>,</p>
+
+    <p>A landlord account has been created for you on JUMAA.</p>
+
+    <h3 style="color:#0B3D2E;">Your account details</h3>
+
+    <p><strong>Landlord ID:</strong> ${_escape(landlordId)}</p>
+    <p><strong>Email:</strong> ${_escape(email)}</p>
+    <p><strong>Phone:</strong> ${_escape(phone)}</p>
+    <p><strong>Apartment:</strong> ${_escape(apartmentName)}</p>
+
+    <div style="background:#eef5f1;padding:18px;border-radius:10px;margin:20px 0;">
+      <p><strong>Temporary password</strong></p>
+      <p style="font-size:22px;">
+        <strong>${_escape(temporaryPassword)}</strong>
+      </p>
+    </div>
+
+    <p>
+      This temporary password is for first-time access only.
+      You will be required to create a new password after signing in.
+    </p>
+
+    <p>Please keep your login credentials secure.</p>
+
+    <p style="margin-top:30px;">
+      Regards,<br>
+      <strong>JUMAA</strong>
+    </p>
+  </div>
+</body>
+</html>
+''',
+    );
+  }
+
+  static Future<bool> sendPasswordResetCode({
+    required String name,
+    required String email,
+    required String code,
+  }) {
+    return sendEmail(
+      to: email,
+      subject: 'JUMAA Password Reset Verification Code',
+      html:
+          '''
+<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;background:#f5f7f6;padding:24px;">
+  <div style="max-width:600px;margin:auto;background:#ffffff;padding:30px;border-radius:14px;">
+    <h2 style="color:#0B3D2E;">JUMAA Password Reset</h2>
+
+    <p>Hello <strong>${_escape(name)}</strong>,</p>
+
+    <p>
+      We received a request to reset your JUMAA password.
+      Use the verification code below:
+    </p>
+
+    <div style="background:#eef5f1;padding:22px;border-radius:10px;text-align:center;margin:25px 0;">
+      <div style="font-size:32px;letter-spacing:8px;font-weight:bold;color:#0B3D2E;">
+        ${_escape(code)}
+      </div>
+    </div>
+
+    <p>
+      Enter this code in the JUMAA app to continue resetting your password.
+    </p>
+
+    <p>
+      If you did not request a password reset, you can safely ignore this email.
+    </p>
+
+    <p style="margin-top:30px;">
+      Regards,<br>
+      <strong>JUMAA</strong>
+    </p>
+  </div>
+</body>
+</html>
+''',
+    );
+  }
+
+  static String _escape(String value) {
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,19 +172,23 @@ Future<void> main() async {
     publishableKey: 'sb_publishable_wFuJsdho3es8WrD4vkqC_A_8MLx_0ft',
   );
 
-  // Load properties and units from Supabase before opening the application.
-  // If Supabase is temporarily unavailable, the app can still start with
-  // empty data and display the appropriate empty states.
+  // Marketplace data is loaded by PublicUserPage when the
+  // user opens Find an Apartment. Do not preload it here because
+  // a slow network must never delay application startup.
+
+  // Landlords are not required for the public marketplace.
+  // Load them separately and never allow them to block startup.
   try {
-    await Future.wait([
-      OpenNestStore.loadPropertiesFromSupabase(),
-      OpenNestStore.loadUnitsFromSupabase(),
-      OpenNestStore.loadLandlords(),
-    ]).timeout(const Duration(seconds: 3));
+    await OpenNestStore.loadLandlords().timeout(const Duration(seconds: 5));
+
+    debugPrint(
+      'STARTUP DEBUG: landlords loaded = '
+      '${OpenNestStore.landlords.length}',
+    );
   } on TimeoutException {
-    debugPrint('Startup data load timed out after 3 seconds.');
+    debugPrint('STARTUP DEBUG: landlord loading timed out.');
   } catch (e) {
-    debugPrint('Startup data load failed: $e');
+    debugPrint('STARTUP DEBUG: landlord loading failed: $e');
   }
 
   runApp(const ApartmentApp());
@@ -213,28 +365,143 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
   }
 
   Future<void> _checkLogin() async {
-    final prefs = await SharedPreferences.getInstance();
+    try {
+      // ----------------------------------------------------------
+      // CHECK THE REAL SUPABASE SESSION FIRST
+      // ----------------------------------------------------------
+      final session = OpenNestStore.supabase.auth.currentSession;
 
-    final loggedIn = prefs.getBool('jumaa_logged_in') ?? false;
-    final email = prefs.getString('jumaa_logged_in_email');
-
-    if (loggedIn && email != null && email.trim().isNotEmpty) {
-      await OpenNestStore.loadOwners();
-
-      final owner = OpenNestStore.findOwnerByEmail(email);
-
-      if (owner != null) {
-        _loggedIn = true;
-      } else {
-        await prefs.remove('jumaa_logged_in');
-        await prefs.remove('jumaa_logged_in_email');
+      if (session == null) {
+        if (mounted) {
+          setState(() {
+            _loggedIn = false;
+            _loading = false;
+          });
+        }
+        return;
       }
-    }
 
-    if (mounted) {
-      setState(() {
-        _loading = false;
-      });
+      final user = OpenNestStore.supabase.auth.currentUser;
+
+      if (user == null) {
+        if (mounted) {
+          setState(() {
+            _loggedIn = false;
+            _loading = false;
+          });
+        }
+        return;
+      }
+
+      debugPrint('AUTH GATE: Existing Supabase session found.');
+      debugPrint('AUTH GATE: user=${user.id}');
+      debugPrint('AUTH GATE: email=${user.email}');
+
+      // ----------------------------------------------------------
+      // DETERMINE ACCOUNT ROLE
+      // ----------------------------------------------------------
+      String? role = user.userMetadata?['role']
+          ?.toString()
+          .toLowerCase()
+          .trim();
+
+      if (role == null || role.isEmpty) {
+        try {
+          final profile = await OpenNestStore.supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', user.id)
+              .maybeSingle();
+
+          role = profile?['role']?.toString().toLowerCase().trim();
+
+          debugPrint('AUTH GATE: profile role=$role');
+        } catch (e) {
+          debugPrint('AUTH GATE: Could not read profile role: $e');
+        }
+      }
+
+      debugPrint('AUTH GATE: role=$role');
+
+      // ----------------------------------------------------------
+      // VALIDATE TENANT SESSION
+      // ----------------------------------------------------------
+      if (role == 'tenant') {
+        final tenantProfile = await OpenNestStore.loadTenantProfile();
+
+        if (tenantProfile != null && mounted) {
+          setState(() {
+            _loggedIn = true;
+            _loading = false;
+          });
+          return;
+        }
+
+        debugPrint('AUTH GATE: Tenant profile could not be loaded.');
+      }
+
+      // ----------------------------------------------------------
+      // VALIDATE LANDLORD SESSION
+      // ----------------------------------------------------------
+      if (role == 'landlord') {
+        final landlord = await OpenNestStore.loadLandlordProfile();
+
+        if (landlord != null && mounted) {
+          setState(() {
+            _loggedIn = true;
+            _loading = false;
+          });
+          return;
+        }
+
+        debugPrint('AUTH GATE: Landlord profile could not be loaded.');
+      }
+
+      // ----------------------------------------------------------
+      // VALIDATE OWNER SESSION
+      // ----------------------------------------------------------
+      if (role == 'owner' || role == null || role.isEmpty) {
+        await OpenNestStore.loadOwners();
+
+        if (mounted) {
+          setState(() {
+            _loggedIn = true;
+            _loading = false;
+          });
+          return;
+        }
+      }
+
+      // ----------------------------------------------------------
+      // INVALID SESSION
+      // ----------------------------------------------------------
+      debugPrint(
+        'AUTH GATE: Session exists but account could not be resolved.',
+      );
+
+      await OpenNestStore.supabase.auth.signOut();
+
+      final prefs = await SharedPreferences.getInstance();
+
+      await prefs.remove('jumaa_logged_in');
+      await prefs.remove('jumaa_logged_in_email');
+      await prefs.remove('jumaa_logged_in_role');
+
+      if (mounted) {
+        setState(() {
+          _loggedIn = false;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('AUTH GATE ERROR: $e');
+
+      if (mounted) {
+        setState(() {
+          _loggedIn = false;
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -1312,6 +1579,236 @@ class OwnerPropertyMediaPage extends StatefulWidget {
 }
 
 class _OwnerPropertyMediaPageState extends State<OwnerPropertyMediaPage> {
+  bool _uploading = false;
+
+  Future<void> _addPhotos() async {
+    if (_uploading) return;
+
+    try {
+      final picker = ImagePicker();
+
+      final pickedFiles = await picker.pickMultiImage(imageQuality: 85);
+
+      if (pickedFiles.isEmpty) {
+        return;
+      }
+
+      setState(() {
+        _uploading = true;
+      });
+
+      final existingUrls = List<String>.from(widget.property.imagePaths);
+
+      for (final file in pickedFiles) {
+        final extension = file.path.contains('.')
+            ? file.path.split('.').last.toLowerCase()
+            : 'jpg';
+
+        final safeExtension = RegExp(r'^[a-zA-Z0-9]+$').hasMatch(extension)
+            ? extension
+            : 'jpg';
+
+        final fileName =
+            '${DateTime.now().millisecondsSinceEpoch}_${existingUrls.length}.$safeExtension';
+
+        final storagePath = '${widget.property.id}/$fileName';
+
+        final bytes = await file.readAsBytes();
+
+        String contentType = 'image/jpeg';
+
+        if (safeExtension == 'png') {
+          contentType = 'image/png';
+        } else if (safeExtension == 'webp') {
+          contentType = 'image/webp';
+        } else if (safeExtension == 'heic') {
+          contentType = 'image/heic';
+        } else if (safeExtension == 'heif') {
+          contentType = 'image/heif';
+        }
+
+        await OpenNestStore.supabase.storage
+            .from('property-images')
+            .uploadBinary(
+              storagePath,
+              bytes,
+              fileOptions: FileOptions(upsert: true, contentType: contentType),
+            );
+
+        final publicUrl = OpenNestStore.supabase.storage
+            .from('property-images')
+            .getPublicUrl(storagePath);
+
+        existingUrls.add(publicUrl);
+      }
+
+      await OpenNestStore.supabase
+          .from('properties')
+          .update({
+            'image_paths': existingUrls,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', widget.property.id);
+
+      widget.property.imagePaths = existingUrls;
+
+      if (!mounted) return;
+
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${pickedFiles.length} photo${pickedFiles.length == 1 ? '' : 's'} uploaded successfully.',
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('PROPERTY PHOTO UPLOAD ERROR: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Photo upload failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _uploading = false;
+        });
+      }
+    }
+  }
+
+  String? _storagePathFromUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+
+      const marker = '/storage/v1/object/public/property-images/';
+
+      final index = uri.path.indexOf(marker);
+
+      if (index == -1) {
+        return null;
+      }
+
+      return Uri.decodeComponent(uri.path.substring(index + marker.length));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _deletePhoto(String photoUrl) async {
+    if (_uploading) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Photo?'),
+          content: const Text(
+            'This photo will be removed from the property gallery.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('DELETE'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final updatedUrls = List<String>.from(widget.property.imagePaths)
+        ..remove(photoUrl);
+
+      final storagePath = _storagePathFromUrl(photoUrl);
+
+      if (storagePath != null && storagePath.isNotEmpty) {
+        try {
+          await OpenNestStore.supabase.storage.from('property-images').remove([
+            storagePath,
+          ]);
+        } catch (e) {
+          debugPrint('PROPERTY PHOTO STORAGE DELETE ERROR: $e');
+        }
+      }
+
+      await OpenNestStore.supabase
+          .from('properties')
+          .update({
+            'image_paths': updatedUrls,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', widget.property.id);
+
+      widget.property.imagePaths = updatedUrls;
+
+      if (!mounted) return;
+
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Photo deleted successfully.')),
+      );
+    } catch (e) {
+      debugPrint('PROPERTY PHOTO DELETE ERROR: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not delete photo: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Widget _photoThumbnail(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return Image.network(
+        path,
+        width: 90,
+        height: 90,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) {
+          return Container(
+            width: 90,
+            height: 90,
+            color: Colors.grey.shade200,
+            child: const Icon(Icons.broken_image_outlined),
+          );
+        },
+      );
+    }
+
+    return Image.file(
+      File(path),
+      width: 90,
+      height: 90,
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) {
+        return Container(
+          width: 90,
+          height: 90,
+          color: Colors.grey.shade200,
+          child: const Icon(Icons.broken_image_outlined),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final images = widget.property.imagePaths;
@@ -1331,12 +1828,36 @@ class _OwnerPropertyMediaPageState extends State<OwnerPropertyMediaPage> {
             'Property Photos',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
+
           const SizedBox(height: 6),
+
           Text(
             'These photos will be displayed on the public apartment page.',
             style: TextStyle(color: Colors.grey.shade600),
           ),
+
           const SizedBox(height: 14),
+
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: FilledButton.icon(
+              onPressed: _uploading ? null : _addPhotos,
+              icon: _uploading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.add_photo_alternate_outlined),
+              label: Text(
+                _uploading ? 'UPLOADING PHOTOS...' : 'ADD PHOTOS',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 18),
 
           if (images.isEmpty)
             Card(
@@ -1354,6 +1875,12 @@ class _OwnerPropertyMediaPageState extends State<OwnerPropertyMediaPage> {
                       'No apartment photos added yet.',
                       textAlign: TextAlign.center,
                     ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Tap ADD PHOTOS to select images from your phone.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey.shade600),
+                    ),
                   ],
                 ),
               ),
@@ -1362,20 +1889,28 @@ class _OwnerPropertyMediaPageState extends State<OwnerPropertyMediaPage> {
             ...images.map(
               (path) => Card(
                 margin: const EdgeInsets.only(bottom: 10),
+                clipBehavior: Clip.antiAlias,
                 child: ListTile(
-                  leading: const Icon(Icons.image_outlined),
-                  title: Text(
-                    path,
+                  contentPadding: const EdgeInsets.all(8),
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: _photoThumbnail(path),
+                  ),
+                  title: const Text(
+                    'Property Photo',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    path.startsWith('http')
+                        ? 'Uploaded to Supabase Storage'
+                        : path,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete_outline),
-                    onPressed: () {
-                      setState(() {
-                        images.remove(path);
-                      });
-                    },
+                    color: Colors.red,
+                    onPressed: () => _deletePhoto(path),
                   ),
                 ),
               ),
@@ -2076,6 +2611,7 @@ class PublicPropertyDetailsPage extends StatefulWidget {
 }
 
 class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
+  bool _bookingSubmitting = false;
   final PageController _pageController = PageController();
 
   int _currentPhoto = 0;
@@ -2585,11 +3121,66 @@ class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
     );
   }
 
-  void _startChat() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => ChatListScreen()),
-    );
+  Future<void> _startChat() async {
+    try {
+      final response = await OpenNestStore.supabase
+          .from('properties')
+          .select('owner_id, landlord_id')
+          .eq('id', widget.property.id)
+          .maybeSingle();
+
+      final landlordId =
+          response?['landlord_id']?.toString() ??
+          response?['owner_id']?.toString() ??
+          widget.property.ownerId;
+
+      debugPrint('CHAT DEBUG: property=${widget.property.id}');
+      debugPrint('CHAT DEBUG: ownerId=${response?['owner_id']}');
+      debugPrint('CHAT DEBUG: landlordId=${response?['landlord_id']}');
+      debugPrint('CHAT DEBUG: resolvedLandlordId=$landlordId');
+
+      if (landlordId.isEmpty) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No landlord is assigned to this apartment.'),
+          ),
+        );
+        return;
+      }
+
+      final landlord = await OpenNestStore.loadLandlordById(landlordId);
+
+      if (!mounted) return;
+
+      if (landlord == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not find the landlord for this apartment.'),
+          ),
+        );
+        return;
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatListScreen(
+            landlordId: landlord.id,
+            landlordName: landlord.fullName,
+            propertyId: widget.property.id,
+            propertyName: widget.property.name,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to open landlord chat: $e')),
+      );
+    }
   }
 
   void _openBookingForm() {
@@ -2738,72 +3329,94 @@ class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
-                          onPressed: () async {
-                            if (nameController.text.trim().isEmpty ||
-                                emailController.text.trim().isEmpty ||
-                                phoneController.text.trim().isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Please enter your name, email and phone number.',
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
+                          onPressed: _bookingSubmitting
+                              ? null
+                              : () async {
+                                  if (nameController.text.trim().isEmpty ||
+                                      emailController.text.trim().isEmpty ||
+                                      phoneController.text.trim().isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Please enter your name, email and phone number.',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
 
-                            if (selectedUnit == null ||
-                                selectedUnit!.trim().isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Please select a vacant unit.'),
-                                ),
-                              );
-                              return;
-                            }
+                                  if (selectedUnit == null ||
+                                      selectedUnit!.trim().isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Please select a vacant unit.',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
 
-                            final selectedApartment = availableUnits.firstWhere(
-                              (unit) => unit.number == selectedUnit,
-                              orElse: () => availableUnits.first,
-                            );
+                                  final selectedApartment = availableUnits
+                                      .firstWhere(
+                                        (unit) => unit.number == selectedUnit,
+                                        orElse: () => availableUnits.first,
+                                      );
 
-                            try {
-                              final bookingService = BookingService();
+                                  try {
+                                    setState(() {
+                                      _bookingSubmitting = true;
+                                    });
 
-                              await bookingService.createBooking(
-                                propertyId: property.id,
-                                unitId: selectedApartment.id,
-                                fullName: nameController.text,
-                                email: emailController.text,
-                                phone: phoneController.text,
-                                message: messageController.text,
-                              );
+                                    final bookingService = BookingService();
 
-                              if (!context.mounted) return;
+                                    debugPrint(
+                                      'BOOKING UI: submitting booking request...',
+                                    );
 
-                              Navigator.pop(sheetContext);
+                                    await bookingService.createBooking(
+                                      propertyId: property.id,
+                                      unitId: selectedApartment.id,
+                                      fullName: nameController.text,
+                                      email: emailController.text,
+                                      phone: phoneController.text,
+                                      message: messageController.text,
+                                    );
 
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Booking request submitted successfully.',
-                                  ),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            } catch (e) {
-                              if (!context.mounted) return;
+                                    if (!context.mounted) return;
 
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Failed to submit booking request: $e',
-                                  ),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            }
-                          },
+                                    Navigator.pop(sheetContext);
+
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Booking request submitted successfully.',
+                                        ),
+                                        behavior: SnackBarBehavior.floating,
+                                      ),
+                                    );
+                                  } catch (e, stackTrace) {
+                                    debugPrint('BOOKING UI ERROR: $e');
+                                    debugPrint('BOOKING UI STACK: $stackTrace');
+
+                                    if (context.mounted) {
+                                      setState(() {
+                                        _bookingSubmitting = false;
+                                      });
+                                    }
+
+                                    if (!context.mounted) return;
+
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Failed to submit booking request: $e',
+                                        ),
+                                        behavior: SnackBarBehavior.floating,
+                                      ),
+                                    );
+                                  }
+                                },
                           icon: const Icon(Icons.send_rounded),
                           label: const Text(
                             'SUBMIT BOOKING REQUEST',
@@ -3388,6 +4001,37 @@ class ApartmentsPage extends StatefulWidget {
 
 class _ApartmentsPageState extends State<ApartmentsPage> {
   String searchQuery = '';
+
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMarketplace();
+  }
+
+  Future<void> _loadMarketplace() async {
+    if (mounted) {
+
+    }
+
+    try {
+      await OpenNestStore.loadMarketplaceDataFromSupabase();
+
+      if (!mounted) return;
+
+
+      debugPrint(
+        'APARTMENTS PAGE: marketplace loaded: '
+        '${OpenNestStore.properties.length} properties, '
+        '${OpenNestStore.apartments.length} units.',
+      );
+    } catch (e) {
+      debugPrint('APARTMENTS PAGE LOAD ERROR: $e');
+
+      if (!mounted) return;
+
+    }
+  }
 
   String? selectedCounty;
   String? selectedSubcounty;
@@ -4175,9 +4819,23 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
 
     final imagePath = images.first;
 
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      return SizedBox(
+        height: 118,
+        width: 105,
+        child: Image.network(
+          imagePath,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) {
+            return _propertyPlaceholder();
+          },
+        ),
+      );
+    }
+
     return SizedBox(
-      height: 205,
-      width: double.infinity,
+      height: 118,
+      width: 105,
       child: Image.file(
         File(imagePath),
         fit: BoxFit.cover,
@@ -4190,8 +4848,8 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
 
   Widget _propertyPlaceholder() {
     return SizedBox(
-      height: 205,
-      width: double.infinity,
+      height: 118,
+      width: 105,
       child: Container(
         color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
         child: Center(
@@ -4256,7 +4914,9 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
 // ============================================================
 
 class PaymentsPage extends StatefulWidget {
-  const PaymentsPage({super.key});
+  final Map<String, dynamic>? tenantProfile;
+
+  const PaymentsPage({super.key, this.tenantProfile});
 
   @override
   State<PaymentsPage> createState() => _PaymentsPageState();
@@ -4268,6 +4928,10 @@ class _PaymentsPageState extends State<PaymentsPage> {
 
   List<Map<String, dynamic>> _payments = [];
 
+  String get _tenantId {
+    return widget.tenantProfile?['id']?.toString() ?? '';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -4275,12 +4939,18 @@ class _PaymentsPageState extends State<PaymentsPage> {
   }
 
   Future<void> _loadPayments() async {
+    if (!mounted) return;
+
     setState(() {
       _loading = true;
       _error = null;
     });
 
     try {
+      if (_tenantId.isEmpty) {
+        throw Exception('Tenant profile is missing.');
+      }
+
       final response = await OpenNestStore.supabase
           .from('payments')
           .select('''
@@ -4290,12 +4960,14 @@ class _PaymentsPageState extends State<PaymentsPage> {
             unit_id,
             amount,
             payment_method,
-            till_number,
+            payment_destination,
             reference,
             status,
             payment_date,
-            payment_destination
+            due_date,
+            created_at
           ''')
+          .eq('tenant_id', _tenantId)
           .order('created_at', ascending: false);
 
       if (!mounted) return;
@@ -4304,6 +4976,11 @@ class _PaymentsPageState extends State<PaymentsPage> {
         _payments = List<Map<String, dynamic>>.from(response);
         _loading = false;
       });
+
+      debugPrint(
+        'TENANT PAYMENTS: loaded ${_payments.length} payment(s) '
+        'for tenant $_tenantId',
+      );
     } catch (e) {
       if (!mounted) return;
 
@@ -4312,7 +4989,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
         _error = e.toString();
       });
 
-      debugPrint('Payment loading failed: $e');
+      debugPrint('TENANT PAYMENT LOADING ERROR: $e');
     }
   }
 
@@ -4838,6 +5515,20 @@ class OpenNestStore {
         .select()
         .order('created_at', ascending: false);
 
+    debugPrint(
+      'MARKETPLACE DEBUG: properties response count = ${response.length}',
+    );
+    for (final row in response) {
+      debugPrint(
+        'MARKETPLACE PROPERTY: '
+        'id=${row['id']} '
+        'name=${row['name']} '
+        'county=${row['county']} '
+        'subcounty=${row['subcounty']} '
+        'location=${row['location']}',
+      );
+    }
+
     // Only replace local data when Supabase actually returned records.
     // This keeps the app usable if the database is empty.
     if (response.isEmpty) {
@@ -4870,6 +5561,13 @@ class OpenNestStore {
           mpesaPaybillNumber: row['mpesa_paybill_number']?.toString() ?? '',
           mpesaAccountNumber: row['mpesa_account_number']?.toString() ?? '',
           paymentsEnabled: row['payments_enabled'] == true,
+          imagePaths: row['image_paths'] is List
+              ? List<String>.from(
+                  (row['image_paths'] as List)
+                      .map((item) => item.toString())
+                      .where((item) => item.trim().isNotEmpty),
+                )
+              : const [],
         ),
       );
     }
@@ -4890,6 +5588,19 @@ class OpenNestStore {
         .from('units')
         .select()
         .order('created_at', ascending: false);
+
+    debugPrint('MARKETPLACE DEBUG: units response count = ${response.length}');
+    for (final row in response) {
+      debugPrint(
+        'MARKETPLACE UNIT: '
+        'id=${row['id']} '
+        'unit=${row['unit_number']} '
+        'property_id=${row['property_id']} '
+        'type=${row['unit_type']} '
+        'rent=${row['monthly_rent']} '
+        'status=${row['status']}',
+      );
+    }
 
     // Keep local/sample units when the Supabase table is empty.
     if (response.isEmpty) {
@@ -5052,8 +5763,14 @@ class OpenNestStore {
           phone: prefs.getString('landlord_${i}_phone') ?? '',
           temporaryPassword: prefs.getString('landlord_${i}_password') ?? '',
           mustResetPassword: prefs.getBool('landlord_${i}_mustReset') ?? false,
-          apartmentName: prefs.getString('landlord_${i}_apartment') ?? '',
-          apartmentId: prefs.getString('landlord_${i}_apartmentId') ?? '',
+          propertyName:
+              prefs.getString('landlord_${i}_propertyName') ??
+              prefs.getString('landlord_${i}_apartment') ??
+              '',
+          propertyId:
+              prefs.getString('landlord_${i}_propertyId') ??
+              prefs.getString('landlord_${i}_apartmentId') ??
+              '',
         ),
       );
     }
@@ -5079,8 +5796,11 @@ class OpenNestStore {
         'landlord_${i}_mustReset',
         landlord.mustResetPassword,
       );
-      await prefs.setString('landlord_${i}_apartment', landlord.apartmentName);
-      await prefs.setString('landlord_${i}_apartmentId', landlord.apartmentId);
+      await prefs.setString(
+        'landlord_${i}_propertyName',
+        landlord.propertyName,
+      );
+      await prefs.setString('landlord_${i}_propertyId', landlord.propertyId);
     }
   }
 
@@ -5131,56 +5851,1231 @@ class OpenNestStore {
       return null;
     }
 
-    final row = await supabase
-        .from('profiles')
-        .select()
-        .eq('id', user.id)
-        .eq('role', 'landlord')
-        .maybeSingle();
+    try {
+      final landlordRow = await supabase
+          .from('landlords')
+          .select('id, full_name, email, phone')
+          .eq('id', user.id)
+          .maybeSingle();
 
-    if (row == null) {
+      if (landlordRow == null) {
+        debugPrint(
+          'LANDLORD PROFILE: No landlord found for auth user ${user.id}',
+        );
+        return null;
+      }
+
+      final propertyRow = await supabase
+          .from('properties')
+          .select('id, name')
+          .eq('landlord_id', user.id)
+          .maybeSingle();
+
+      final landlord = Landlord(
+        id: landlordRow['id']?.toString() ?? user.id,
+        fullName: landlordRow['full_name']?.toString() ?? '',
+        email: landlordRow['email']?.toString() ?? user.email ?? '',
+        phone: landlordRow['phone']?.toString() ?? '',
+        temporaryPassword: '',
+        mustResetPassword: false,
+        propertyName: propertyRow?['name']?.toString() ?? '',
+        propertyId: propertyRow?['id']?.toString() ?? '',
+      );
+
+      landlords
+        ..clear()
+        ..add(landlord);
+
+      debugPrint(
+        'LANDLORD PROFILE: ${landlord.fullName} | '
+        '${landlord.email} | '
+        '${landlord.propertyName} | '
+        '${landlord.propertyId}',
+      );
+
+      return landlord;
+    } catch (e) {
+      debugPrint('LANDLORD PROFILE LOAD ERROR: $e');
+      return null;
+    }
+  }
+
+  static Future<Map<String, dynamic>?> loadTenantProfile() async {
+    final user = supabase.auth.currentUser;
+
+    if (user == null) {
+      debugPrint('TENANT PROFILE: No authenticated user.');
       return null;
     }
 
-    final landlord = Landlord(
-      id: row['id'] as String,
-      fullName: row['full_name'] as String? ?? '',
-      email: row['email'] as String? ?? user.email ?? '',
-      phone: row['phone'] as String? ?? '',
-      temporaryPassword: '',
-      mustResetPassword: false,
-      apartmentName: '',
-      apartmentId: '',
-    );
+    try {
+      final tenantRow = await supabase
+          .from('tenants')
+          .select('''
+            id,
+            auth_user_id,
+            property_id,
+            unit_id,
+            full_name,
+            email,
+            phone,
+            account_status,
+            move_in_date,
+            properties (
+              id,
+              name,
+              description,
+              location,
+              address,
+              phone,
+              email,
+              county,
+              subcounty
+            ),
+            units (
+              id,
+              unit_number,
+              unit_type,
+              rent,
+              monthly_rent,
+              status
+            )
+          ''')
+          .eq('auth_user_id', user.id)
+          .maybeSingle();
 
-    landlords
-      ..clear()
-      ..add(landlord);
+      if (tenantRow == null) {
+        debugPrint('TENANT PROFILE: No tenant found for auth user ${user.id}');
+        return null;
+      }
 
-    return landlord;
+      debugPrint(
+        'TENANT PROFILE: '
+        '${tenantRow['full_name']} | '
+        '${tenantRow['email']} | '
+        'property=${tenantRow['property_id']} | '
+        'unit=${tenantRow['unit_id']}',
+      );
+
+      return Map<String, dynamic>.from(tenantRow);
+    } catch (e) {
+      debugPrint('TENANT PROFILE LOAD ERROR: $e');
+      return null;
+    }
   }
 
   static Future<Landlord?> loadLandlordById(String id) async {
     final row = await supabase
-        .from('profiles')
-        .select()
+        .from('landlords')
+        .select('id, full_name, email, phone')
         .eq('id', id)
-        .eq('role', 'landlord')
         .maybeSingle();
 
     if (row == null) {
       return null;
     }
 
+    final propertyRow = await supabase
+        .from('properties')
+        .select('id, name')
+        .eq('landlord_id', id)
+        .maybeSingle();
+
     return Landlord(
-      id: row['id'] as String,
-      fullName: row['full_name'] as String? ?? '',
-      email: row['email'] as String? ?? '',
-      phone: row['phone'] as String? ?? '',
+      id: row['id']?.toString() ?? id,
+      fullName: row['full_name']?.toString() ?? '',
+      email: row['email']?.toString() ?? '',
+      phone: row['phone']?.toString() ?? '',
       temporaryPassword: '',
       mustResetPassword: false,
-      apartmentName: '',
-      apartmentId: '',
+      propertyName: propertyRow?['name']?.toString() ?? '',
+      propertyId: propertyRow?['id']?.toString() ?? '',
+    );
+  }
+}
+
+// ============================================================
+// JUMAA - TENANT DASHBOARD
+// ============================================================
+
+class TenantDashboardPage extends StatefulWidget {
+  final Map<String, dynamic> tenantProfile;
+
+  const TenantDashboardPage({super.key, required this.tenantProfile});
+
+  @override
+  State<TenantDashboardPage> createState() => _TenantDashboardPageState();
+}
+
+class _TenantDashboardPageState extends State<TenantDashboardPage> {
+  int currentIndex = 0;
+
+  Map<String, dynamic> get tenant {
+    return widget.tenantProfile;
+  }
+
+  Map<String, dynamic> get property {
+    final value = tenant['properties'];
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return {};
+  }
+
+  Map<String, dynamic> get unit {
+    final value = tenant['units'];
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return {};
+  }
+
+  String _value(dynamic value, [String fallback = 'Not provided']) {
+    final text = value?.toString().trim() ?? '';
+    return text.isEmpty ? fallback : text;
+  }
+
+  void _selectPage(int index) {
+    if (!mounted) return;
+
+    setState(() {
+      currentIndex = index;
+    });
+  }
+
+  List<Widget> get pages => [
+    _buildDashboardPage(),
+    const ChatListScreen(),
+    const TenantAnnouncementsPage(),
+    TenantNotificationsPage(tenantProfile: widget.tenantProfile),
+    PaymentsPage(tenantProfile: widget.tenantProfile),
+    SettingsPage(
+      isDarkMode: Theme.of(context).brightness == Brightness.dark,
+      onDarkModeChanged: (enabled) {
+        final state = context.findAncestorStateOfType<_ApartmentAppState>();
+
+        state?._setDarkMode(enabled);
+      },
+    ),
+  ];
+
+  Widget _buildDashboardPage() {
+    final tenantName = _value(tenant['full_name'], 'Tenant');
+    final propertyName = _value(property['name'], 'My Home');
+    final unitNumber = _value(unit['unit_number'], '');
+    final unitType = _value(unit['unit_type'], '');
+    final rent = _value(
+      unit['monthly_rent'] ?? unit['rent'],
+      '',
+    );
+    final location = _value(property['location'], '');
+    final accountStatus = _value(tenant['account_status'], 'active');
+
+    final hasUnit = unitNumber.isNotEmpty;
+    final hasRent = rent.isNotEmpty;
+    final hasLocation = location.isNotEmpty;
+    final hasUnitType = unitType.isNotEmpty;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'My Home',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Logout',
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              final navigator = Navigator.of(context);
+
+              await OpenNestStore.supabase.auth.signOut();
+
+              if (!mounted) return;
+
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('jumaa_logged_in');
+              await prefs.remove('jumaa_logged_in_email');
+              await prefs.remove('jumaa_logged_in_role');
+
+              if (!mounted) return;
+
+              navigator.pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const JUMAALoginPage()),
+                (route) => false,
+              );
+            },
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          final profile = await OpenNestStore.loadTenantProfile();
+
+          if (!mounted || profile == null) return;
+
+          setState(() {
+            widget.tenantProfile
+              ..clear()
+              ..addAll(profile);
+          });
+        },
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 30),
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Welcome, $tenantName 👋',
+                        style: const TextStyle(
+                          fontSize: 27,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0B3D2E),
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      const Text(
+                        "Here's what's happening with your home.",
+                        style: TextStyle(
+                          color: Colors.black54,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 24),
+
+            // ----------------------------------------------------------
+            // MY HOME
+            // ----------------------------------------------------------
+            Card(
+              elevation: 2,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F3EE),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Icon(
+                            Icons.apartment_rounded,
+                            color: Color(0xFF0B3D2E),
+                            size: 29,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'MY HOME',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black54,
+                                  letterSpacing: 1,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                propertyName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    if (hasUnit)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F8F6),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.door_front_door_outlined,
+                              color: Color(0xFF0B3D2E),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'YOUR UNIT',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black54,
+                                      letterSpacing: 0.8,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    unitNumber,
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  if (hasUnitType) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      unitType,
+                                      style: const TextStyle(
+                                        color: Colors.black54,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      _emptyHomeMessage(
+                        Icons.home_work_outlined,
+                        'No unit assigned yet',
+                        'Your property manager has not assigned a unit to this account.',
+                      ),
+
+                    if (hasLocation) ...[
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on_outlined,
+                            size: 20,
+                            color: Colors.black54,
+                          ),
+                          const SizedBox(width: 9),
+                          Expanded(
+                            child: Text(
+                              location,
+                              style: const TextStyle(
+                                color: Colors.black54,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // ----------------------------------------------------------
+            // RENT
+            // ----------------------------------------------------------
+            Card(
+              elevation: 1,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => _selectPage(4),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8F3EE),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Icon(
+                          Icons.payments_outlined,
+                          color: Color(0xFF0B3D2E),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'RENT',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black54,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              hasRent ? rent : 'Rent details unavailable',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: hasRent
+                                    ? const Color(0xFF0B3D2E)
+                                    : Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: Colors.black45,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 18),
+
+            // ----------------------------------------------------------
+            // ACCOUNT STATUS
+            // ----------------------------------------------------------
+            Row(
+              children: [
+                const Icon(
+                  Icons.verified_user_outlined,
+                  size: 19,
+                  color: Color(0xFF0B3D2E),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Account',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    accountStatus.toUpperCase(),
+                    style: TextStyle(
+                      color: Colors.green.shade700,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 10,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 26),
+
+            const Text(
+              'Tenant Services',
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            Row(
+              children: [
+                Expanded(
+                  child: _serviceCard(
+                    icon: Icons.payments_outlined,
+                    title: 'Payments',
+                    subtitle: 'Rent & history',
+                    onTap: () => _selectPage(4),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _serviceCard(
+                    icon: Icons.build_outlined,
+                    title: 'Maintenance',
+                    subtitle: 'Request repairs',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const MaintenancePage(),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            Row(
+              children: [
+                Expanded(
+                  child: _serviceCard(
+                    icon: Icons.chat_bubble_outline,
+                    title: 'Messages',
+                    subtitle: 'Contact landlord',
+                    onTap: () => _selectPage(1),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _serviceCard(
+                    icon: Icons.notifications_none,
+                    title: 'Notifications',
+                    subtitle: 'Stay updated',
+                    onTap: () => _selectPage(3),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            _serviceCard(
+              icon: Icons.campaign_outlined,
+              title: 'Announcements',
+              subtitle: 'Apartment updates',
+              onTap: () => _selectPage(2),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyHomeMessage(
+    IconData icon,
+    String title,
+    String subtitle,
+  ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F8F8),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: Colors.black45),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _serviceCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    final accentColors = <String, Color>{
+      'Payments': const Color(0xFF4F46E5),
+      'Maintenance': const Color(0xFFF97316),
+      'Messages': const Color(0xFF0EA5E9),
+      'Notifications': const Color(0xFFE11D48),
+      'Announcements': const Color(0xFF16A34A),
+    };
+
+    final accent = accentColors[title] ?? const Color(0xFF6366F1);
+
+    return Card(
+      elevation: 1,
+      margin: EdgeInsets.zero,
+      shadowColor: accent.withValues(alpha: 0.15),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 11,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  icon,
+                  size: 21,
+                  color: accent,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 19,
+                color: accent.withValues(alpha: 0.65),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      _buildDashboardPage(),
+      const ChatListScreen(),
+      const TenantAnnouncementsPage(),
+      TenantNotificationsPage(tenantProfile: widget.tenantProfile),
+      PaymentsPage(tenantProfile: widget.tenantProfile),
+      SettingsPage(
+        isDarkMode: Theme.of(context).brightness == Brightness.dark,
+        onDarkModeChanged: (enabled) {
+          final state = context.findAncestorStateOfType<_ApartmentAppState>();
+
+          state?._setDarkMode(enabled);
+        },
+      ),
+    ];
+
+    return Scaffold(
+      body: IndexedStack(index: currentIndex, children: pages),
+      bottomNavigationBar: NavigationBarTheme(
+        data: const NavigationBarThemeData(
+          height: 62,
+          labelTextStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: 9, fontWeight: FontWeight.w600),
+          ),
+          iconTheme: WidgetStatePropertyAll(IconThemeData(size: 21)),
+        ),
+        child: NavigationBar(
+          selectedIndex: currentIndex,
+          onDestinationSelected: _selectPage,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.dashboard_outlined),
+              selectedIcon: Icon(Icons.dashboard),
+              label: 'Dashboard',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.chat_bubble_outline),
+              selectedIcon: Icon(Icons.chat_bubble),
+              label: 'Messages',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.campaign_outlined),
+              selectedIcon: Icon(Icons.campaign),
+              label: 'Announcements',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.notifications_none),
+              selectedIcon: Icon(Icons.notifications),
+              label: 'Notifications',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.payments_outlined),
+              selectedIcon: Icon(Icons.payments),
+              label: 'Payments',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.settings_outlined),
+              selectedIcon: Icon(Icons.settings),
+              label: 'Settings',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// TENANT ANNOUNCEMENTS
+// ============================================================
+
+class TenantAnnouncementsPage extends StatelessWidget {
+  const TenantAnnouncementsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Announcements',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: const [
+          Card(
+            child: ListTile(
+              leading: Icon(Icons.campaign_outlined),
+              title: Text('No announcements yet'),
+              subtitle: Text(
+                'Apartment announcements from management will appear here.',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================
+// TENANT NOTIFICATIONS
+// ============================================================
+
+class TenantNotificationsPage extends StatefulWidget {
+  final Map<String, dynamic> tenantProfile;
+
+  const TenantNotificationsPage({super.key, required this.tenantProfile});
+
+  @override
+  State<TenantNotificationsPage> createState() =>
+      _TenantNotificationsPageState();
+}
+
+class _TenantNotificationsPageState extends State<TenantNotificationsPage> {
+  List<Map<String, dynamic>> _notifications = [];
+  bool _loading = true;
+
+  String get _propertyId =>
+      widget.tenantProfile['property_id']?.toString() ?? '';
+
+  String get _tenantId => widget.tenantProfile['id']?.toString() ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotifications();
+  }
+
+  Future<void> _loadNotifications() async {
+    if (_propertyId.isEmpty) {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+      return;
+    }
+
+    try {
+      final response = await OpenNestStore.supabase
+          .from('notifications')
+          .select(
+            'id, property_id, tenant_id, landlord_id, title, message, '
+            'notification_type, is_read, created_at',
+          )
+          .eq('property_id', _propertyId)
+          .order('created_at', ascending: false);
+
+      if (!mounted) return;
+
+      setState(() {
+        _notifications = List<Map<String, dynamic>>.from(response);
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('TENANT NOTIFICATIONS LOAD ERROR: $e');
+
+      if (!mounted) return;
+
+      setState(() => _loading = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load notifications: $e')),
+      );
+    }
+  }
+
+  Future<void> _createNotification() async {
+    final titleController = TextEditingController();
+    final messageController = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Add Notification'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    hintText: 'e.g. Water interruption',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: messageController,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Message',
+                    hintText: 'Write your notification...',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (titleController.text.trim().isEmpty ||
+                    messageController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Enter both a title and message.'),
+                    ),
+                  );
+                  return;
+                }
+
+                Navigator.pop(dialogContext, true);
+              },
+              child: const Text('Post Notification'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != true) {
+      titleController.dispose();
+      messageController.dispose();
+      return;
+    }
+
+    if (_propertyId.isEmpty || _tenantId.isEmpty) {
+      titleController.dispose();
+      messageController.dispose();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your apartment information is missing.')),
+      );
+      return;
+    }
+
+    try {
+      await OpenNestStore.supabase.from('notifications').insert({
+        'property_id': _propertyId,
+        'tenant_id': _tenantId,
+        'title': titleController.text.trim(),
+        'message': messageController.text.trim(),
+        'notification_type': 'general',
+        'is_read': false,
+      });
+
+      titleController.dispose();
+      messageController.dispose();
+
+      await _loadNotifications();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Notification posted. Everyone in your apartment can see it.',
+          ),
+        ),
+      );
+    } catch (e) {
+      titleController.dispose();
+      messageController.dispose();
+
+      debugPrint('TENANT NOTIFICATION CREATE ERROR: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not create notification: $e')),
+      );
+    }
+  }
+
+  String _formatDate(dynamic value) {
+    if (value == null) return '';
+
+    final date = DateTime.tryParse(value.toString());
+
+    if (date == null) return value.toString();
+
+    return '${date.day.toString().padLeft(2, '0')}/'
+        '${date.month.toString().padLeft(2, '0')}/'
+        '${date.year} '
+        '${date.hour.toString().padLeft(2, '0')}:'
+        '${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Notifications',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadNotifications,
+          ),
+        ],
+      ),
+
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _createNotification,
+        icon: const Icon(Icons.add),
+        label: const Text('Add Notification'),
+      ),
+
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadNotifications,
+              child: ListView(
+                padding: const EdgeInsets.all(18),
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          const CircleAvatar(
+                            child: Icon(Icons.campaign_outlined),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Apartment Notifications',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  'Tenants and landlords can post important '
+                                  'updates. Everyone in this apartment can '
+                                  'see them.',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 22),
+
+                  const Text(
+                    'Recent Notifications',
+                    style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  if (_notifications.isEmpty)
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(28),
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.notifications_none_outlined,
+                              size: 55,
+                              color: Colors.grey.shade500,
+                            ),
+                            const SizedBox(height: 12),
+                            const Text(
+                              'No notifications yet',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Be the first to post an important update '
+                              'for your apartment.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else
+                    ..._notifications.map((notification) {
+                      final title = notification['title']?.toString() ?? '';
+                      final message = notification['message']?.toString() ?? '';
+                      final createdAt = notification['created_at'];
+
+                      final isMine =
+                          notification['tenant_id']?.toString() == _tenantId;
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          leading: const CircleAvatar(
+                            child: Icon(Icons.notifications_outlined),
+                          ),
+                          title: Text(
+                            title,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(message),
+                                const SizedBox(height: 7),
+                                Text(
+                                  '${isMine ? 'You' : 'Apartment member'}'
+                                  ' • ${_formatDate(createdAt)}',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                ],
+              ),
+            ),
     );
   }
 }
@@ -5671,11 +7566,111 @@ class _TenantsPageState extends State<TenantsPage> {
                   label: const Text('Edit Tenant'),
                 ),
               ),
+
+              const SizedBox(height: 10),
+
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(sheetContext);
+                    _deleteTenant(tenant);
+                  },
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete Tenant'),
+                ),
+              ),
             ],
           ),
         );
       },
     );
+  }
+
+  Future<void> _deleteTenant(Tenant tenant) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Tenant?'),
+          content: Text(
+            'Are you sure you want to permanently delete '
+            '${tenant.name}?\n\n'
+            'This will remove the tenant from this owner account '
+            'and delete their JUMAA account access.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('DELETE'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Deleting tenant...'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    try {
+      final response = await OpenNestStore.supabase.functions.invoke(
+        'delete-tenant-account',
+        body: {'tenant_id': tenant.id, 'email': tenant.email},
+      );
+
+      final data = response.data;
+
+      if (response.status != 200 || data is! Map || data['success'] != true) {
+        throw Exception(
+          data is Map && data['error'] != null
+              ? data['error'].toString()
+              : 'Tenant could not be deleted.',
+        );
+      }
+
+      // Remove it immediately from the current owner's screen.
+      if (!mounted) return;
+
+      setState(() {
+        tenants.removeWhere((item) => item.id == tenant.id);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${tenant.name} deleted successfully.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // Re-sync from Supabase so it cannot return after refresh.
+      await _loadTenants();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete tenant: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Widget _tenantDetailRow(IconData icon, String title, String value) {
@@ -5820,6 +7815,52 @@ class _TenantsPageState extends State<TenantsPage> {
                                 })
                                 .select()
                                 .single();
+
+                            final tenantId =
+                                tenantResponse['id']?.toString() ?? '';
+
+                            if (tenantId.isEmpty) {
+                              throw Exception(
+                                'Tenant was created but no tenant ID was returned.',
+                              );
+                            }
+
+                            // Create the tenant's Supabase Auth account,
+                            // tenant profile and send login credentials.
+                            final accountResponse = await OpenNestStore
+                                .supabase
+                                .functions
+                                .invoke(
+                                  'create-tenant-account',
+                                  body: {
+                                    'tenant_id': tenantId,
+                                    'full_name': name,
+                                    'email': email,
+                                    'phone': phone,
+                                    'apartment': unitNumber,
+                                  },
+                                );
+
+                            final accountData = accountResponse.data;
+
+                            if (accountResponse.status != 200) {
+                              String accountError =
+                                  'Tenant account could not be created.';
+
+                              if (accountData is Map &&
+                                  accountData['error'] != null) {
+                                accountError = accountData['error'].toString();
+                              }
+
+                              throw Exception(accountError);
+                            }
+
+                            if (accountData is Map &&
+                                accountData['email_sent'] == false) {
+                              throw Exception(
+                                'Tenant account was created, but the invitation email could not be sent.',
+                              );
+                            }
 
                             final tenant = Tenant(
                               id: tenantResponse['id']?.toString() ?? '',
@@ -6078,6 +8119,16 @@ class _LandlordLoginPageState extends State<LandlordLoginPage> {
         return;
       }
 
+      if (landlord.mustResetPassword) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => LandlordResetPasswordPage(landlord: landlord),
+          ),
+        );
+        return;
+      }
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -6260,6 +8311,7 @@ class _LandlordResetPasswordPageState extends State<LandlordResetPasswordPage> {
 
   bool obscurePassword = true;
   bool obscureConfirm = true;
+  bool _isSaving = false;
 
   Future<void> _resetPassword() async {
     final password = passwordController.text;
@@ -6281,22 +8333,58 @@ class _LandlordResetPasswordPageState extends State<LandlordResetPasswordPage> {
       return;
     }
 
-    // For the prototype we replace the temporary password.
-    // Later this will be replaced by secure backend authentication.
-    widget.landlord.temporaryPassword = password;
-    widget.landlord.mustResetPassword = false;
+    setState(() {
+      _isSaving = true;
+    });
 
-    await OpenNestStore.saveLandlords();
+    try {
+      final response = await OpenNestStore.supabase.functions.invoke(
+        'update-landlord-password',
+        body: {'new_password': password},
+      );
 
-    if (!mounted) return;
+      final data = response.data;
 
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(
-        builder: (_) => LandlordDashboardPage(landlord: widget.landlord),
-      ),
-      (route) => false,
-    );
+      if (data is! Map || data['success'] != true) {
+        throw Exception(
+          data is Map && data['error'] != null
+              ? data['error'].toString()
+              : 'Could not update your password.',
+        );
+      }
+
+      widget.landlord.temporaryPassword = password;
+      widget.landlord.mustResetPassword = false;
+
+      await OpenNestStore.saveLandlords();
+
+      if (!mounted) return;
+
+      setState(() {
+        _isSaving = false;
+      });
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (_) => LandlordDashboardPage(landlord: widget.landlord),
+        ),
+        (route) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isSaving = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
@@ -6375,7 +8463,7 @@ class _LandlordResetPasswordPageState extends State<LandlordResetPasswordPage> {
                   ),
                   const SizedBox(height: 24),
                   FilledButton(
-                    onPressed: _resetPassword,
+                    onPressed: _isSaving ? null : _resetPassword,
                     child: const Padding(
                       padding: EdgeInsets.symmetric(vertical: 14),
                       child: Text('SAVE NEW PASSWORD'),
@@ -6395,562 +8483,6 @@ class _LandlordResetPasswordPageState extends State<LandlordResetPasswordPage> {
 // LANDLORD DASHBOARD
 // ============================================================
 
-class LandlordDashboardPage extends StatefulWidget {
-  final Landlord landlord;
-
-  const LandlordDashboardPage({super.key, required this.landlord});
-
-  @override
-  State<LandlordDashboardPage> createState() => _LandlordDashboardPageState();
-}
-
-class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
-  bool _loadingDashboardData = false;
-
-  List<Apartment> get assignedApartments {
-    // Prefer the landlord's property ID when available.
-    if (widget.landlord.apartmentId.isNotEmpty) {
-      final byId = OpenNestStore.apartments
-          .where(
-            (apartment) => apartment.propertyId == widget.landlord.apartmentId,
-          )
-          .toList();
-
-      if (byId.isNotEmpty) {
-        return byId;
-      }
-    }
-
-    // Fallback to the property name.
-    if (widget.landlord.apartmentName.isNotEmpty) {
-      return OpenNestStore.apartments
-          .where(
-            (apartment) =>
-                apartment.propertyName.trim().toLowerCase() ==
-                widget.landlord.apartmentName.trim().toLowerCase(),
-          )
-          .toList();
-    }
-
-    return [];
-  }
-
-  int get occupiedCount =>
-      assignedApartments.where((a) => a.status == 'Occupied').length;
-
-  int get vacantCount =>
-      assignedApartments.where((a) => a.status == 'Vacant').length;
-
-  int get reservedCount =>
-      assignedApartments.where((a) => a.status == 'Reserved').length;
-
-  int get maintenanceCount =>
-      assignedApartments.where((a) => a.status == 'Under Maintenance').length;
-
-  Future<void> _reloadDashboardData() async {
-    if (_loadingDashboardData) return;
-
-    setState(() {
-      _loadingDashboardData = true;
-    });
-
-    try {
-      await Future.wait([
-        OpenNestStore.loadPropertiesFromSupabase(),
-        OpenNestStore.loadUnitsFromSupabase(),
-        OpenNestStore.loadLandlords(),
-      ]);
-    } catch (e) {
-      debugPrint('LANDLORD DASHBOARD RELOAD ERROR: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loadingDashboardData = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final apartments = assignedApartments;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Landlord Dashboard'),
-        actions: [
-          IconButton(
-            tooltip: 'Notifications',
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {
-              _showComingSoon(context, 'Notifications');
-            },
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: () async {
-            await _reloadDashboardData();
-          },
-          child: ListView(
-            padding: const EdgeInsets.all(18),
-            children: [
-              Text(
-                'Welcome, ${widget.landlord.fullName} 👋',
-                style: const TextStyle(
-                  fontSize: 25,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                widget.landlord.apartmentName.isNotEmpty
-                    ? widget.landlord.apartmentName
-                    : 'My Property',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
-              ),
-              const SizedBox(height: 20),
-
-              // ==================================================
-              // OCCUPANCY SUMMARY
-              // ==================================================
-              Row(
-                children: [
-                  Expanded(
-                    child: _statCard(
-                      context,
-                      Icons.home_work_outlined,
-                      apartments.length.toString(),
-                      'Units',
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _statCard(
-                      context,
-                      Icons.people_outline,
-                      occupiedCount.toString(),
-                      'Occupied',
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _statCard(
-                      context,
-                      Icons.home_outlined,
-                      vacantCount.toString(),
-                      'Vacant',
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 10),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: _statCard(
-                      context,
-                      Icons.event_available_outlined,
-                      reservedCount.toString(),
-                      'Reserved',
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _statCard(
-                      context,
-                      Icons.build_outlined,
-                      maintenanceCount.toString(),
-                      'Maintenance',
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 28),
-
-              const Text(
-                'Property Management',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-
-              const SizedBox(height: 12),
-
-              _actionTile(
-                context,
-                Icons.apartment_outlined,
-                'My Apartments',
-                'View units and manage occupancy',
-                () => _showApartments(context),
-              ),
-
-              _actionTile(
-                context,
-                Icons.people_outline,
-                'Tenants',
-                'View tenants in your property',
-                () => _showComingSoon(context, 'Tenants'),
-              ),
-
-              _actionTile(
-                context,
-                Icons.assignment_outlined,
-                'Booking Requests',
-                'Review and approve tenant bookings',
-                () => _showComingSoon(context, 'Booking Requests'),
-              ),
-
-              _actionTile(
-                context,
-                Icons.payments_outlined,
-                'Payments',
-                'Paid, pending and overdue rent',
-                () => _showComingSoon(context, 'Payments'),
-              ),
-
-              _actionTile(
-                context,
-                Icons.chat_outlined,
-                'Messages',
-                'Chat privately with your tenants',
-                () => _showComingSoon(context, 'Messages'),
-              ),
-
-              _actionTile(
-                context,
-                Icons.campaign_outlined,
-                'Announcements',
-                'Send announcements to your tenants',
-                () => _showComingSoon(context, 'Announcements'),
-              ),
-
-              _actionTile(
-                context,
-                Icons.notifications_outlined,
-                'Notifications',
-                'View property notifications',
-                () => _showComingSoon(context, 'Notifications'),
-              ),
-
-              _actionTile(
-                context,
-                Icons.bar_chart_outlined,
-                'Reports',
-                'Occupancy and payment reports',
-                () => _showComingSoon(context, 'Reports'),
-              ),
-
-              const SizedBox(height: 24),
-
-              const Text(
-                'Current Units',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-
-              const SizedBox(height: 10),
-
-              if (apartments.isEmpty)
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        Icon(
-                          Icons.apartment_outlined,
-                          size: 48,
-                          color: Colors.grey.shade500,
-                        ),
-                        const SizedBox(height: 10),
-                        const Text(
-                          'No units assigned',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 5),
-                        Text(
-                          'There are currently no units assigned to this landlord.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                ...apartments.map(
-                  (apartment) => _unitPreview(context, apartment),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _statCard(
-    BuildContext context,
-    IconData icon,
-    String value,
-    String label,
-  ) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-        child: Column(
-          children: [
-            Icon(icon),
-            const SizedBox(height: 7),
-            Text(
-              value,
-              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              label,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _actionTile(
-    BuildContext context,
-    IconData icon,
-    String title,
-    String subtitle,
-    VoidCallback onTap,
-  ) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        leading: Icon(icon),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: onTap,
-      ),
-    );
-  }
-
-  Widget _unitPreview(BuildContext context, Apartment apartment) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        leading: CircleAvatar(
-          child: Icon(
-            apartment.status == 'Occupied' ? Icons.person : Icons.home_outlined,
-          ),
-        ),
-        title: Text(
-          apartment.number,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Text('${apartment.type} • ${apartment.rent}'),
-        trailing: _statusChip(apartment.status),
-        onTap: () => _editOccupancy(context, apartment),
-      ),
-    );
-  }
-
-  Widget _statusChip(String status) {
-    return Chip(label: Text(status, style: const TextStyle(fontSize: 11)));
-  }
-
-  void _showApartments(BuildContext context) {
-    final apartments = assignedApartments;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.75,
-            maxChildSize: 0.95,
-            minChildSize: 0.4,
-            builder: (_, controller) {
-              return ListView(
-                controller: controller,
-                padding: const EdgeInsets.all(18),
-                children: [
-                  const Text(
-                    'My Apartments',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${apartments.length} unit(s)',
-                    style: TextStyle(color: Colors.grey.shade600),
-                  ),
-                  const SizedBox(height: 18),
-                  ...apartments.map(
-                    (apartment) => Card(
-                      child: ListTile(
-                        title: Text(
-                          apartment.number,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text(
-                          '${apartment.type}\n'
-                          '${apartment.rent}'
-                          '${apartment.tenant.isNotEmpty ? '\nTenant: ${apartment.tenant}' : ''}',
-                        ),
-                        isThreeLine: apartment.tenant.isNotEmpty,
-                        trailing: _statusChip(apartment.status),
-                        onTap: () {
-                          Navigator.pop(sheetContext);
-                          _editOccupancy(context, apartment);
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _editOccupancy(BuildContext context, Apartment apartment) async {
-    String selectedStatus = apartment.status;
-    final tenantController = TextEditingController(text: apartment.tenant);
-
-    const statuses = ['Vacant', 'Occupied', 'Reserved', 'Under Maintenance'];
-
-    await showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final needsTenant =
-                selectedStatus == 'Occupied' || selectedStatus == 'Reserved';
-
-            return AlertDialog(
-              title: Text('Edit ${apartment.number}'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Occupancy Status',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-
-                    DropdownButtonFormField<String>(
-                      initialValue: statuses.contains(selectedStatus)
-                          ? selectedStatus
-                          : 'Vacant',
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                      ),
-                      items: statuses
-                          .map(
-                            (status) => DropdownMenuItem<String>(
-                              value: status,
-                              child: Text(status),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value == null) return;
-
-                        setDialogState(() {
-                          selectedStatus = value;
-
-                          if (value == 'Vacant' ||
-                              value == 'Under Maintenance') {
-                            tenantController.clear();
-                          }
-                        });
-                      },
-                    ),
-
-                    if (needsTenant) ...[
-                      const SizedBox(height: 18),
-                      const Text(
-                        'Tenant',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: tenantController,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          hintText: 'Enter tenant name',
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(dialogContext);
-                  },
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    if (needsTenant && tenantController.text.trim().isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Enter a tenant before marking the unit occupied.',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-
-                    setState(() {
-                      apartment.status = selectedStatus;
-
-                      if (selectedStatus == 'Vacant' ||
-                          selectedStatus == 'Under Maintenance') {
-                        apartment.tenant = '';
-                      } else {
-                        apartment.tenant = tenantController.text.trim();
-                      }
-                    });
-
-                    Navigator.pop(dialogContext);
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          '${apartment.number} updated successfully.',
-                        ),
-                      ),
-                    );
-                  },
-                  child: const Text('Save'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    tenantController.dispose();
-  }
-
-  void _showComingSoon(BuildContext context, String feature) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$feature will be connected next.')));
-  }
-}
-
 // ============================================================
 // LANDLORDS PAGE
 // ============================================================
@@ -6968,7 +8500,7 @@ class _LandlordsPageState extends State<LandlordsPage> {
     final emailController = TextEditingController();
     final phoneController = TextEditingController();
 
-    String? selectedApartment;
+    String? selectedPropertyId;
 
     showDialog(
       context: context,
@@ -7012,22 +8544,22 @@ class _LandlordsPageState extends State<LandlordsPage> {
                     ),
                     const SizedBox(height: 14),
                     DropdownButtonFormField<String>(
-                      initialValue: selectedApartment,
+                      initialValue: selectedPropertyId,
                       decoration: const InputDecoration(
-                        labelText: 'Assign apartment',
+                        labelText: 'Assign property',
                         prefixIcon: Icon(Icons.apartment_outlined),
                       ),
-                      items: OpenNestStore.apartments
+                      items: OpenNestStore.properties
                           .map(
-                            (apartment) => DropdownMenuItem<String>(
-                              value: apartment.number,
-                              child: Text(apartment.number),
+                            (property) => DropdownMenuItem<String>(
+                              value: property.id,
+                              child: Text(property.name),
                             ),
                           )
                           .toList(),
                       onChanged: (value) {
                         setDialogState(() {
-                          selectedApartment = value;
+                          selectedPropertyId = value;
                         });
                       },
                     ),
@@ -7042,7 +8574,7 @@ class _LandlordsPageState extends State<LandlordsPage> {
                 FilledButton.icon(
                   icon: const Icon(Icons.person_add),
                   label: const Text('Create Account'),
-                  onPressed: () {
+                  onPressed: () async {
                     final name = nameController.text.trim();
                     final email = emailController.text.trim();
                     final phone = phoneController.text.trim();
@@ -7050,7 +8582,7 @@ class _LandlordsPageState extends State<LandlordsPage> {
                     if (name.isEmpty ||
                         email.isEmpty ||
                         phone.isEmpty ||
-                        selectedApartment == null) {
+                        selectedPropertyId == null) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text(
@@ -7077,28 +8609,100 @@ class _LandlordsPageState extends State<LandlordsPage> {
                       return;
                     }
 
-                    final id =
-                        'ONL-${1000 + OpenNestStore.landlords.length + 1}';
+                    final selectedProperty = OpenNestStore.properties
+                        .firstWhere(
+                          (property) => property.id == selectedPropertyId,
+                        );
+
+                    // ------------------------------------------------------
+                    // Create the REAL landlord Supabase Auth account.
+                    // The Edge Function generates the actual temporary
+                    // password and sends the invitation email.
+                    // ------------------------------------------------------
+                    final accountResponse = await OpenNestStore
+                        .supabase
+                        .functions
+                        .invoke(
+                          'create-landlord-account',
+                          body: {
+                            'full_name': name,
+                            'email': email,
+                            'phone': phone,
+                            'property_id': selectedProperty.id,
+                            'property_name': selectedProperty.name,
+                          },
+                        );
+
+                    final accountData = accountResponse.data;
+
+                    if (accountResponse.status != 200) {
+                      String accountError =
+                          'Landlord account could not be created.';
+
+                      if (accountData is Map && accountData['error'] != null) {
+                        accountError = accountData['error'].toString();
+                      }
+
+                      throw Exception(accountError);
+                    }
+
+                    if (accountData is! Map || accountData['success'] != true) {
+                      throw Exception(
+                        accountData is Map && accountData['error'] != null
+                            ? accountData['error'].toString()
+                            : 'Landlord account could not be created.',
+                      );
+                    }
 
                     final temporaryPassword =
-                        'ON${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+                        accountData['temporary_password']?.toString() ?? '';
+
+                    if (temporaryPassword.isEmpty) {
+                      throw Exception(
+                        'Landlord account was created but no temporary password was returned.',
+                      );
+                    }
+
+                    final authUserId =
+                        accountData['auth_user_id']?.toString() ?? '';
+
+                    if (authUserId.isEmpty) {
+                      throw Exception(
+                        'Landlord account was created but no Auth user ID was returned.',
+                      );
+                    }
 
                     final landlord = Landlord(
-                      id: id,
+                      id: authUserId,
                       fullName: name,
                       email: email,
                       phone: phone,
                       temporaryPassword: temporaryPassword,
                       mustResetPassword: true,
-                      apartmentName: selectedApartment!,
-                      apartmentId: selectedApartment!,
+                      propertyName: selectedProperty.name,
+                      propertyId: selectedProperty.id,
                     );
 
                     setState(() {
                       OpenNestStore.landlords.add(landlord);
                     });
 
+                    await OpenNestStore.saveLandlords();
+
+                    if (!mounted || !dialogContext.mounted) return;
+
                     Navigator.pop(dialogContext);
+
+                    if (accountData['email_sent'] == false) {
+                      ScaffoldMessenger.of(dialogContext).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Landlord account was created, but the invitation email could not be sent.',
+                          ),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
 
                     _showInvitation(landlord);
                   },
@@ -7142,7 +8746,7 @@ class _LandlordsPageState extends State<LandlordsPage> {
                   'Temporary password',
                   landlord.temporaryPassword,
                 ),
-                _credentialRow('Apartment', landlord.apartmentName),
+                _credentialRow('Property', landlord.propertyName),
                 const SizedBox(height: 16),
                 const Text(
                   'This temporary password is for first-time access only. '
@@ -7181,6 +8785,264 @@ class _LandlordsPageState extends State<LandlordsPage> {
         ],
       ),
     );
+  }
+
+  void _showLandlordDetails(Landlord landlord) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 30),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 32,
+                        child: Text(
+                          landlord.fullName.isNotEmpty
+                              ? landlord.fullName[0].toUpperCase()
+                              : '?',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              landlord.fullName.isNotEmpty
+                                  ? landlord.fullName
+                                  : 'Unknown Landlord',
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Landlord',
+                              style: TextStyle(color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  _landlordDetailRow(
+                    Icons.badge_outlined,
+                    'Landlord ID',
+                    landlord.id,
+                  ),
+
+                  _landlordDetailRow(
+                    Icons.email_outlined,
+                    'Email',
+                    landlord.email,
+                  ),
+
+                  _landlordDetailRow(
+                    Icons.phone_outlined,
+                    'Phone',
+                    landlord.phone,
+                  ),
+
+                  _landlordDetailRow(
+                    Icons.apartment_outlined,
+                    'Property',
+                    landlord.propertyName.isNotEmpty
+                        ? landlord.propertyName
+                        : 'Not assigned',
+                  ),
+
+                  _landlordDetailRow(
+                    Icons.vpn_key_outlined,
+                    'Password Status',
+                    landlord.mustResetPassword
+                        ? 'Temporary password — reset required'
+                        : 'Password set',
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(sheetContext);
+                            _deleteLandlord(landlord);
+                          },
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: Colors.red,
+                          ),
+                          label: const Text(
+                            'Delete',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () {
+                            Navigator.pop(sheetContext);
+                          },
+                          icon: const Icon(Icons.close),
+                          label: const Text('Close'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _landlordDetailRow(IconData icon, String title, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 21),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 2),
+                SelectableText(
+                  value.isNotEmpty ? value : 'Not provided',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteLandlord(Landlord landlord) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Landlord?'),
+          content: Text(
+            'Are you sure you want to permanently delete '
+            '${landlord.fullName}?\n\n'
+            'This will remove the landlord account and their '
+            'access to the app.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('DELETE'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Deleting landlord...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      final response = await OpenNestStore.supabase.functions.invoke(
+        'delete-landlord-account',
+        body: {'landlord_id': landlord.id, 'email': landlord.email},
+      );
+
+      final data = response.data;
+
+      final alreadyDeleted =
+          response.status == 404 &&
+          data is Map &&
+          data['success'] == false &&
+          data['error']?.toString().contains(
+                "Could not find the landlord's Supabase UUID",
+              ) ==
+              true;
+
+      if (response.status != 200 && !alreadyDeleted) {
+        throw Exception(
+          data is Map && data['error'] != null
+              ? data['error'].toString()
+              : 'Landlord could not be deleted.',
+        );
+      }
+
+      // Remove the landlord from the local store even when the
+      // Supabase account was already deleted manually.
+      OpenNestStore.landlords.removeWhere(
+        (item) =>
+            item.id == landlord.id ||
+            item.email.trim().toLowerCase() ==
+                landlord.email.trim().toLowerCase(),
+      );
+
+      await OpenNestStore.saveLandlords();
+
+      if (!mounted) return;
+
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${landlord.fullName} deleted successfully.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete landlord: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -7247,10 +9109,32 @@ class _LandlordsPageState extends State<LandlordsPage> {
                     ),
                     subtitle: Text(
                       '${landlord.email}\n'
-                      '${landlord.apartmentName} • ${landlord.id}',
+                      '${landlord.propertyName} • ${landlord.id}',
                     ),
                     isThreeLine: true,
-                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _showLandlordDetails(landlord),
+                    trailing: PopupMenuButton<String>(
+                      onSelected: (value) {
+                        if (value == 'delete') {
+                          _deleteLandlord(landlord);
+                        }
+                      },
+                      itemBuilder: (context) => const [
+                        PopupMenuItem<String>(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              Icon(Icons.delete_outline, color: Colors.red),
+                              SizedBox(width: 10),
+                              Text(
+                                'Delete Landlord',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               },
@@ -7393,22 +9277,6 @@ class _SettingsPageState extends State<SettingsPage> {
             elevation: 0,
             child: Column(
               children: [
-                ListTile(
-                  leading: const Icon(Icons.apartment),
-                  title: const Text('Apartment Settings'),
-                  subtitle: Text('Default type: $defaultApartmentType'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: _showApartmentSettings,
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.payments),
-                  title: const Text('Payment Settings'),
-                  subtitle: Text('Rent due on day $rentDueDay of each month'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: _showPaymentSettings,
-                ),
-                const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.people_outline),
                   title: const Text('Tenant Settings'),
@@ -7646,266 +9514,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 _showMessage('Language set to $tempLanguage.');
               },
               child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showApartmentSettings() {
-    String tempType = defaultApartmentType;
-    bool tempVacantFirst = showVacantFirst;
-    bool tempRequireNumber = requireApartmentNumber;
-
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Apartment Settings'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: tempType,
-                  decoration: const InputDecoration(
-                    labelText: 'Default apartment type',
-                    prefixIcon: Icon(Icons.bed),
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'Bedsitter',
-                      child: Text('Bedsitter'),
-                    ),
-                    DropdownMenuItem(
-                      value: '1 Bedroom',
-                      child: Text('1 Bedroom'),
-                    ),
-                    DropdownMenuItem(
-                      value: '2 Bedroom',
-                      child: Text('2 Bedroom'),
-                    ),
-                    DropdownMenuItem(
-                      value: '3 Bedroom',
-                      child: Text('3 Bedroom'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      setDialogState(() => tempType = value);
-                    }
-                  },
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Show vacant apartments first'),
-                  value: tempVacantFirst,
-                  onChanged: (value) {
-                    setDialogState(() => tempVacantFirst = value);
-                  },
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Require apartment number'),
-                  value: tempRequireNumber,
-                  onChanged: (value) {
-                    setDialogState(() => tempRequireNumber = value);
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                setState(() {
-                  defaultApartmentType = tempType;
-                  showVacantFirst = tempVacantFirst;
-                  requireApartmentNumber = tempRequireNumber;
-                });
-                Navigator.pop(dialogContext);
-                _showMessage('Apartment settings saved.');
-              },
-              child: const Text('Save Changes'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showPaymentSettings() {
-    final property = OpenNestStore.properties.isNotEmpty
-        ? OpenNestStore.properties.first
-        : null;
-
-    if (property == null) {
-      _showMessage('No property found for this account.');
-      return;
-    }
-
-    int tempDueDay = rentDueDay;
-    bool tempReminders = paymentReminders;
-    bool tempAutoOverdue = autoMarkOverdue;
-    bool tempPaymentsEnabled = property.paymentsEnabled;
-
-    final tillController = TextEditingController(
-      text: property.mpesaTillNumber,
-    );
-
-    final paybillController = TextEditingController(
-      text: property.mpesaPaybillNumber,
-    );
-
-    final accountController = TextEditingController(
-      text: property.mpesaAccountNumber,
-    );
-
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Payment Settings'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<int>(
-                  initialValue: tempDueDay,
-                  decoration: const InputDecoration(
-                    labelText: 'Rent due day',
-                    prefixIcon: Icon(Icons.calendar_month),
-                  ),
-                  items: List.generate(
-                    28,
-                    (index) => DropdownMenuItem<int>(
-                      value: index + 1,
-                      child: Text('Day ${index + 1}'),
-                    ),
-                  ),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setDialogState(() => tempDueDay = value);
-                    }
-                  },
-                ),
-
-                const SizedBox(height: 16),
-
-                TextField(
-                  controller: tillController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'M-PESA Till Number',
-                    hintText: 'Enter your M-PESA Till Number',
-                    prefixIcon: Icon(Icons.store),
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-
-                Text(
-                  'Tenants will use this Till Number when paying rent.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-
-                const SizedBox(height: 16),
-
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Enable payments'),
-                  subtitle: const Text('Allow tenants to make rent payments'),
-                  value: tempPaymentsEnabled,
-                  onChanged: (value) {
-                    setDialogState(() => tempPaymentsEnabled = value);
-                  },
-                ),
-
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Payment reminders'),
-                  subtitle: const Text('Enable rent reminder notifications'),
-                  value: tempReminders,
-                  onChanged: (value) {
-                    setDialogState(() => tempReminders = value);
-                  },
-                ),
-
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Auto-mark overdue'),
-                  subtitle: const Text('Mark unpaid rent as overdue'),
-                  value: tempAutoOverdue,
-                  onChanged: (value) {
-                    setDialogState(() => tempAutoOverdue = value);
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                tillController.dispose();
-                paybillController.dispose();
-                accountController.dispose();
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                final till = tillController.text.trim();
-
-                if (tempPaymentsEnabled && till.isEmpty) {
-                  _showMessage('Please enter your M-PESA Till Number.');
-                  return;
-                }
-
-                try {
-                  await OpenNestStore.supabase
-                      .from('properties')
-                      .update({
-                        'payment_method': 'till',
-                        'mpesa_till_number': till,
-                        'mpesa_paybill_number': paybillController.text.trim(),
-                        'mpesa_account_number': accountController.text.trim(),
-                        'payments_enabled': tempPaymentsEnabled,
-                      })
-                      .eq('id', property.id);
-
-                  property.paymentMethod = 'till';
-                  property.mpesaTillNumber = till;
-                  property.mpesaPaybillNumber = paybillController.text.trim();
-                  property.mpesaAccountNumber = accountController.text.trim();
-                  property.paymentsEnabled = tempPaymentsEnabled;
-
-                  setState(() {
-                    rentDueDay = tempDueDay;
-                    paymentReminders = tempReminders;
-                    autoMarkOverdue = tempAutoOverdue;
-                  });
-
-                  tillController.dispose();
-                  paybillController.dispose();
-                  accountController.dispose();
-
-                  if (!dialogContext.mounted) return;
-
-                  Navigator.pop(dialogContext);
-                  _showMessage('Payment settings saved successfully.');
-                } catch (e) {
-                  _showMessage('Failed to save payment settings: $e');
-                }
-              },
-              child: const Text('Save Changes'),
             ),
           ],
         ),
@@ -9184,6 +10792,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           .from('properties')
           .insert({
             'owner_id': user.id,
+            'landlord_id': user.id,
             'name': propertyName,
             'county': _selectedCounty!,
             'subcounty': _selectedSubcounty!,
@@ -10064,11 +11673,30 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
       debugPrint('SIGNUP DEBUG: session=${authResponse.session != null}');
       debugPrint('SIGNUP DEBUG: emailConfirmedAt=${user.emailConfirmedAt}');
 
+      // When email confirmation is enabled in Supabase, a successful
+      // signup normally has no session until the user verifies their email.
       if (authResponse.session == null) {
-        throw Exception(
-          'ACCOUNT CREATED BUT EMAIL VERIFICATION IS REQUIRED. '
-          'Check your email to verify the account, then log in.',
+        if (!mounted) return;
+
+        setState(() {
+          _isCreating = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Account created successfully. Please check your email to verify your account.',
+            ),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 6),
+          ),
         );
+
+        debugPrint(
+          'REGISTRATION: Account created. Waiting for email verification.',
+        );
+
+        return;
       }
 
       debugPrint('REGISTRATION STEP 1: Auth successful');
@@ -10093,6 +11721,7 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
           .from('properties')
           .insert({
             'owner_id': user.id,
+            'landlord_id': user.id,
             'name': propertyName,
             'county': _selectedCounty!,
             'subcounty': _selectedSubcounty!,
@@ -10768,16 +12397,56 @@ class _PublicUserPageState extends State<PublicUserPage> {
   final TextEditingController _searchController = TextEditingController();
 
   String _search = '';
+  bool _loadingApartments = true;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
 
     _searchController.addListener(() {
+      if (!mounted) return;
+
       setState(() {
         _search = _searchController.text.trim().toLowerCase();
       });
     });
+
+    _loadApartments();
+  }
+
+  Future<void> _loadApartments() async {
+    if (mounted) {
+      setState(() {
+        _loadingApartments = true;
+        _loadError = null;
+      });
+    }
+
+    try {
+      await OpenNestStore.loadMarketplaceDataFromSupabase();
+
+      if (!mounted) return;
+
+      setState(() {
+        _loadingApartments = false;
+      });
+
+      debugPrint(
+        'PUBLIC FIND APARTMENT: '
+        '${OpenNestStore.properties.length} properties, '
+        '${OpenNestStore.apartments.length} units loaded.',
+      );
+    } catch (e) {
+      debugPrint('PUBLIC FIND APARTMENT LOAD ERROR: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _loadingApartments = false;
+        _loadError = 'Could not load apartments.';
+      });
+    }
   }
 
   @override
@@ -10788,12 +12457,18 @@ class _PublicUserPageState extends State<PublicUserPage> {
 
   List<Apartment> get _apartments {
     final results = OpenNestStore.apartments.where((apartment) {
+      // Only vacant units are publicly available.
+      if (apartment.status.toLowerCase() != 'vacant') {
+        return false;
+      }
+
       if (_search.isEmpty) return true;
 
       return apartment.number.toLowerCase().contains(_search) ||
           apartment.type.toLowerCase().contains(_search) ||
           apartment.rent.toLowerCase().contains(_search) ||
-          apartment.tenant.toLowerCase().contains(_search);
+          apartment.propertyName.toLowerCase().contains(_search) ||
+          apartment.location.toLowerCase().contains(_search);
     }).toList();
 
     // Boosted listings first.
@@ -10872,7 +12547,53 @@ class _PublicUserPageState extends State<PublicUserPage> {
             const SizedBox(height: 12),
 
             Expanded(
-              child: apartments.isEmpty
+              child: _loadingApartments
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF0B3D2E),
+                      ),
+                    )
+                  : _loadError != null
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.error_outline,
+                              size: 60,
+                              color: Colors.red.shade300,
+                            ),
+                            const SizedBox(height: 12),
+                            const Text(
+                              'Could not load apartments',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _loadError!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: Colors.black54),
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: _loadApartments,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Retry'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF0B3D2E),
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : apartments.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -11082,6 +12803,59 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
   bool _obscurePassword = true;
   bool _isLoggingIn = false;
 
+  Future<void> _forgotPassword() async {
+    final email = _emailController.text.trim().toLowerCase();
+
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter your email first.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    try {
+      await OpenNestStore.supabase.auth.resetPasswordForEmail(email);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Password reset instructions have been sent to your email.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on AuthException catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.message.isNotEmpty
+                ? e.message
+                : 'Could not send password reset instructions.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not send password reset instructions.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      debugPrint('JUMAA FORGOT PASSWORD ERROR: $e');
+    }
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -11104,60 +12878,242 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
       _isLoggingIn = true;
     });
 
-    await OpenNestStore.loadOwners();
+    try {
+      // ----------------------------------------------------------
+      // JUMAA LOGIN — SUPABASE AUTH
+      // ----------------------------------------------------------
+      final response = await OpenNestStore.supabase.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
 
-    final owner = OpenNestStore.findOwnerByEmail(email);
+      final user = response.user;
 
-    if (!mounted) return;
+      if (user == null) {
+        throw Exception('Supabase did not return a user.');
+      }
 
-    if (owner != null && owner.password.trim() == password) {
-      final prefs = await SharedPreferences.getInstance();
+      debugPrint('JUMAA LOGIN: Supabase authentication successful.');
+      debugPrint('JUMAA LOGIN: user=${user.id}');
+      debugPrint('JUMAA LOGIN: email=${user.email}');
 
-      await prefs.setBool('jumaa_logged_in', true);
-      await prefs.setString('jumaa_logged_in_email', owner.email);
+      // ----------------------------------------------------------
+      // Determine the account role.
+      //
+      // Owner accounts are created with role = owner.
+      // Landlord accounts are created with role = landlord.
+      // ----------------------------------------------------------
+      String? role = user.userMetadata?['role']
+          ?.toString()
+          .toLowerCase()
+          .trim();
 
+      debugPrint('JUMAA LOGIN: metadata role=$role');
+
+      // ----------------------------------------------------------
+      // If Auth metadata does not contain the role, check the
+      // profiles table. This makes the login more reliable.
+      // ----------------------------------------------------------
+      if (role == null || role.isEmpty) {
+        try {
+          final profile = await OpenNestStore.supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', user.id)
+              .maybeSingle();
+
+          role = profile?['role']?.toString().toLowerCase().trim();
+
+          debugPrint('JUMAA LOGIN: profile role=$role');
+        } catch (e) {
+          debugPrint('JUMAA LOGIN: Could not read profile role: $e');
+        }
+      }
+
+      // ----------------------------------------------------------
+      // LANDLORD LOGIN
+      // ----------------------------------------------------------
+      if (role == 'landlord') {
+        debugPrint('JUMAA LOGIN: Landlord account detected.');
+
+        final landlord = await OpenNestStore.loadLandlordProfile();
+
+        if (!mounted) return;
+
+        if (landlord == null) {
+          await OpenNestStore.supabase.auth.signOut();
+
+          if (!mounted) return;
+
+          throw Exception(
+            'This landlord account does not have a valid landlord profile.',
+          );
+        }
+
+        final prefs = await SharedPreferences.getInstance();
+
+        await prefs.setBool('jumaa_logged_in', true);
+        await prefs.setString('jumaa_logged_in_email', email);
+        await prefs.setString('jumaa_logged_in_role', 'landlord');
+
+        if (!mounted) return;
+
+        setState(() {
+          _isLoggingIn = false;
+        });
+
+        // ----------------------------------------------------------
+        // FIRST LOGIN — FORCE TEMPORARY PASSWORD CHANGE
+        // ----------------------------------------------------------
+        if (landlord.mustResetPassword) {
+          debugPrint(
+            'JUMAA LOGIN: Temporary password detected. '
+            'Opening password reset page.',
+          );
+
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => LandlordResetPasswordPage(landlord: landlord),
+            ),
+          );
+
+          return;
+        }
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => LandlordDashboardPage(landlord: landlord),
+          ),
+        );
+
+        return;
+      }
+
+      // ----------------------------------------------------------
+      // TENANT LOGIN
+      // ----------------------------------------------------------
+      if (role == 'tenant') {
+        debugPrint('JUMAA LOGIN: Tenant account detected.');
+
+        final tenantProfile = await OpenNestStore.loadTenantProfile();
+
+        if (!mounted) return;
+
+        if (tenantProfile == null) {
+          await OpenNestStore.supabase.auth.signOut();
+
+          if (!mounted) return;
+
+          throw Exception(
+            'This tenant account does not have a valid tenant profile.',
+          );
+        }
+
+        final prefs = await SharedPreferences.getInstance();
+
+        await prefs.setBool('jumaa_logged_in', true);
+        await prefs.setString('jumaa_logged_in_email', email);
+        await prefs.setString('jumaa_logged_in_role', 'tenant');
+
+        if (!mounted) return;
+
+        setState(() {
+          _isLoggingIn = false;
+        });
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TenantDashboardPage(tenantProfile: tenantProfile),
+          ),
+        );
+
+        return;
+      }
+
+      // ----------------------------------------------------------
+      // OWNER LOGIN
+      // ----------------------------------------------------------
+      if (role == 'owner' || role == null || role.isEmpty) {
+        debugPrint('JUMAA LOGIN: Owner account detected.');
+
+        await OpenNestStore.loadOwners();
+
+        if (!mounted) return;
+
+        final prefs = await SharedPreferences.getInstance();
+
+        await prefs.setBool('jumaa_logged_in', true);
+        await prefs.setString('jumaa_logged_in_email', email);
+        await prefs.setString('jumaa_logged_in_role', 'owner');
+
+        if (!mounted) return;
+
+        setState(() {
+          _isLoggingIn = false;
+        });
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DashboardPage(
+              isDarkMode: Theme.of(context).brightness == Brightness.dark,
+              onDarkModeChanged: (enabled) {
+                final state = context
+                    .findAncestorStateOfType<_ApartmentAppState>();
+
+                state?._setDarkMode(enabled);
+              },
+            ),
+          ),
+        );
+
+        return;
+      }
+
+      // ----------------------------------------------------------
+      // UNKNOWN ROLE
+      // ----------------------------------------------------------
+      await OpenNestStore.supabase.auth.signOut();
+
+      throw Exception(
+        'This account is not registered as a JUMAA owner or landlord account.',
+      );
+    } on AuthException catch (e) {
       if (!mounted) return;
 
       setState(() {
         _isLoggingIn = false;
       });
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => DashboardPage(
-            isDarkMode: Theme.of(context).brightness == Brightness.dark,
-            onDarkModeChanged: (enabled) {
-              final state = context
-                  .findAncestorStateOfType<_ApartmentAppState>();
-              state?._setDarkMode(enabled);
-            },
+      debugPrint('JUMAA LOGIN ERROR: ${e.message}');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.message.isNotEmpty ? e.message : 'Invalid email or password.',
           ),
+          behavior: SnackBarBehavior.floating,
         ),
       );
+    } catch (e) {
+      if (!mounted) return;
 
-      return;
-    }
+      setState(() {
+        _isLoggingIn = false;
+      });
 
-    setState(() {
-      _isLoggingIn = false;
-    });
+      debugPrint('JUMAA LOGIN ERROR: $e');
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Invalid email or password. Check your details and try again.',
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
         ),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  void _forgotPassword() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const JUMAAForgotPasswordPage()),
-    );
+      );
+    }
   }
 
   @override
@@ -11340,13 +13296,13 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
       return;
     }
 
-    await OpenNestStore.loadLandlords();
+    await OpenNestStore.loadOwners();
 
     if (!mounted) return;
 
-    final landlord = OpenNestStore.findLandlordByEmail(email);
+    final owner = OpenNestStore.findOwnerByEmail(email);
 
-    if (landlord == null) {
+    if (owner == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No JUMAA account was found with this email.'),
@@ -11360,7 +13316,14 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
       _loading = true;
     });
 
-    await Future.delayed(const Duration(milliseconds: 600));
+    final code = (10000 + DateTime.now().millisecondsSinceEpoch % 90000)
+        .toString();
+
+    final emailSent = await JumaaEmailService.sendPasswordResetCode(
+      name: owner.fullName,
+      email: owner.email,
+      code: code,
+    );
 
     if (!mounted) return;
 
@@ -11368,13 +13331,22 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
       _loading = false;
     });
 
-    final code = (10000 + DateTime.now().millisecondsSinceEpoch % 90000)
-        .toString();
+    if (!emailSent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'We could not send the verification email. Please try again.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => JUMAAVerifyCodePage(landlord: landlord, code: code),
+        builder: (_) => JUMAAVerifyCodePage(owner: owner, code: code),
       ),
     );
   }
@@ -11462,7 +13434,7 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
           const SizedBox(height: 18),
 
           const Text(
-            'Prototype mode: the verification code will be displayed in the next screen. We will connect this to real email delivery next.',
+            'A verification code has been sent to your email address.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.black45, fontSize: 12, height: 1.4),
           ),
@@ -11479,11 +13451,11 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
 class JUMAAVerifyCodePage extends StatefulWidget {
   const JUMAAVerifyCodePage({
     super.key,
-    required this.landlord,
+    required this.owner,
     required this.code,
   });
 
-  final Landlord landlord;
+  final Owner owner;
   final String code;
 
   @override
@@ -11513,7 +13485,7 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (_) => JUMAACreateNewPasswordPage(landlord: widget.landlord),
+        builder: (_) => JUMAACreateNewPasswordPage(owner: widget.owner),
       ),
     );
   }
@@ -11553,7 +13525,7 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
           const SizedBox(height: 10),
 
           Text(
-            'A verification code was sent to ${widget.landlord.email}.',
+            'A verification code was sent to ${widget.owner.email}.',
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.black54),
           ),
@@ -11652,9 +13624,9 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
 // ============================================================
 
 class JUMAACreateNewPasswordPage extends StatefulWidget {
-  const JUMAACreateNewPasswordPage({super.key, required this.landlord});
+  const JUMAACreateNewPasswordPage({super.key, required this.owner});
 
-  final Landlord landlord;
+  final Owner owner;
 
   @override
   State<JUMAACreateNewPasswordPage> createState() =>
@@ -11701,10 +13673,9 @@ class _JUMAACreateNewPasswordPageState
       _saving = true;
     });
 
-    widget.landlord.temporaryPassword = password;
-    widget.landlord.mustResetPassword = false;
+    widget.owner.password = password;
 
-    await OpenNestStore.saveLandlords();
+    await OpenNestStore.saveOwners();
 
     if (!mounted) return;
 
@@ -11858,7 +13829,18 @@ class _JUMAACreateNewPasswordPageState
 }
 
 class ChatListScreen extends StatefulWidget {
-  const ChatListScreen({super.key});
+  final String? landlordId;
+  final String? landlordName;
+  final String? propertyId;
+  final String? propertyName;
+
+  const ChatListScreen({
+    super.key,
+    this.landlordId,
+    this.landlordName,
+    this.propertyId,
+    this.propertyName,
+  });
 
   @override
   State<ChatListScreen> createState() => _ChatListScreenState();
@@ -11904,36 +13886,44 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F7F7),
+      backgroundColor: const Color(0xFFEFE7DE),
 
       appBar: AppBar(
+        toolbarHeight: 54,
         elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        backgroundColor: const Color(0xFF075E54),
+        foregroundColor: Colors.white,
 
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back, size: 20),
+          padding: EdgeInsets.zero,
           onPressed: () => Navigator.of(context).pop(),
         ),
+
+        titleSpacing: 0,
 
         title: const Row(
           children: [
             CircleAvatar(
-              radius: 18,
-              backgroundColor: Color(0xFF1976D2),
-              child: Icon(Icons.support_agent, color: Colors.white, size: 20),
+              radius: 15,
+              backgroundColor: Color(0xFF128C7E),
+              child: Icon(
+                Icons.admin_panel_settings_outlined,
+                color: Colors.white,
+                size: 17,
+              ),
             ),
-            SizedBox(width: 10),
+            SizedBox(width: 8),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Messages',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                  'Admin',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                 ),
                 Text(
-                  'Support',
-                  style: TextStyle(fontSize: 12, color: Colors.green),
+                  'online',
+                  style: TextStyle(fontSize: 10, color: Colors.white70),
                 ),
               ],
             ),
@@ -11949,7 +13939,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   ? _buildEmptyState()
                   : ListView.builder(
                       controller: _scrollController,
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+                      padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
                       itemCount: _messages.length,
                       itemBuilder: (context, index) {
                         final message = _messages[index];
@@ -12019,48 +14009,44 @@ class _ChatListScreenState extends State<ChatListScreen> {
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 300),
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+        constraints: const BoxConstraints(maxWidth: 245),
+        margin: const EdgeInsets.only(bottom: 4, left: 4, right: 4),
+        padding: const EdgeInsets.fromLTRB(9, 6, 7, 5),
         decoration: BoxDecoration(
-          color: isMe ? const Color(0xFF1976D2) : Colors.white,
+          color: isMe ? const Color(0xFFD9FDD3) : Colors.white,
           borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft: Radius.circular(isMe ? 18 : 4),
-            bottomRight: Radius.circular(isMe ? 4 : 18),
+            topLeft: const Radius.circular(9),
+            topRight: const Radius.circular(9),
+            bottomLeft: Radius.circular(isMe ? 9 : 2),
+            bottomRight: Radius.circular(isMe ? 2 : 9),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 5,
-              offset: const Offset(0, 2),
-            ),
-          ],
         ),
-        child: Column(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Align(
-              alignment: Alignment.centerLeft,
+            Flexible(
               child: Text(
                 text,
                 style: TextStyle(
-                  color: isMe ? Colors.white : Colors.black87,
-                  fontSize: 15,
+                  color: Colors.black87,
+                  fontSize: 12,
+                  height: 1.25,
                 ),
               ),
             ),
 
-            const SizedBox(height: 4),
+            const SizedBox(width: 6),
 
             Text(
               timeString,
-              style: TextStyle(
-                color: isMe ? Colors.white70 : Colors.grey,
-                fontSize: 10,
-              ),
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 8),
             ),
+
+            if (isMe) ...[
+              const SizedBox(width: 2),
+              const Icon(Icons.done_all, size: 11, color: Color(0xFF53BDEB)),
+            ],
           ],
         ),
       ),

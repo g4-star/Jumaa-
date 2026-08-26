@@ -39,6 +39,7 @@ dependencies:
   shared_preferences: ^2.5.5
   supabase_flutter: ^2.17.2
   geolocator: ^14.0.3
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:
@@ -56,3 +57,9 @@ flutter_launcher_icons:
   android: true
   ios: false
   image_path: "assets/houses/house1.jpg"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/houses/
+    - assets/jumaa_house_icon.png

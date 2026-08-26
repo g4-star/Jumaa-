@@ -48,8 +48,8 @@ class _LandlordPaymentsPageState
         padding: const EdgeInsets.all(18),
         children: [
           Text(
-            widget.landlord.apartmentName.isNotEmpty
-                ? widget.landlord.apartmentName
+            widget.landlord.propertyName.isNotEmpty
+                ? widget.landlord.propertyName
                 : 'Apartment Payments',
             style: const TextStyle(
               fontSize: 23,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/landlord.dart';
 import '../../models/apartment.dart';
@@ -16,41 +17,156 @@ import 'landlord_settings_page.dart';
 class LandlordDashboardPage extends StatefulWidget {
   final Landlord landlord;
 
-  const LandlordDashboardPage({
-    super.key,
-    required this.landlord,
-  });
+  const LandlordDashboardPage({super.key, required this.landlord});
 
   @override
-  State<LandlordDashboardPage> createState() =>
-      _LandlordDashboardPageState();
+  State<LandlordDashboardPage> createState() => _LandlordDashboardPageState();
 }
 
 class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
+  final SupabaseClient _supabase = Supabase.instance.client;
+
   int _currentIndex = 0;
 
+  List<Apartment> _supabaseUnits = [];
+
   List<Apartment> get assignedUnits {
-    if (widget.landlord.apartmentId.isNotEmpty) {
+    if (_supabaseUnits.isNotEmpty) {
+      return _supabaseUnits;
+    }
+
+    if (widget.landlord.propertyId.isNotEmpty) {
       final byId = OpenNestStore.apartments
-          .where(
-            (unit) => unit.propertyId == widget.landlord.apartmentId,
-          )
+          .where((unit) => unit.propertyId == widget.landlord.propertyId)
           .toList();
 
       if (byId.isNotEmpty) return byId;
     }
 
-    if (widget.landlord.apartmentName.isNotEmpty) {
+    if (widget.landlord.propertyName.isNotEmpty) {
       return OpenNestStore.apartments
           .where(
             (unit) =>
                 unit.propertyName.trim().toLowerCase() ==
-                widget.landlord.apartmentName.trim().toLowerCase(),
+                widget.landlord.propertyName.trim().toLowerCase(),
           )
           .toList();
     }
 
     return [];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    debugPrint(
+      'LANDLORD DASHBOARD: initState '
+      'landlord=${widget.landlord.fullName} '
+      'property=${widget.landlord.propertyName} '
+      'propertyId=${widget.landlord.propertyId}',
+    );
+
+    _loadLandlordUnits();
+  }
+
+  Future<void> _loadLandlordUnits() async {
+    final propertyId = widget.landlord.propertyId.trim();
+
+    debugPrint('LANDLORD DASHBOARD UNITS: loading for propertyId=$propertyId');
+
+    if (propertyId.isEmpty) {
+      debugPrint('LANDLORD DASHBOARD UNITS: propertyId is empty');
+
+      if (!mounted) return;
+
+      setState(() {
+        _supabaseUnits = [];
+      });
+
+      return;
+    }
+
+    try {
+      final response = await _supabase
+          .from('units')
+          .select(
+            'id, property_id, unit_number, unit_type, '
+            'rent, monthly_rent, status, description',
+          )
+          .eq('property_id', propertyId)
+          .order('created_at', ascending: false);
+
+      debugPrint(
+        'LANDLORD DASHBOARD UNITS: Supabase returned '
+        '${response.length} units',
+      );
+
+      final units = <Apartment>[];
+
+      for (final row in response) {
+        final rent = row['monthly_rent'] ?? row['rent'];
+
+        final unit = Apartment(
+          id: row['id']?.toString() ?? '',
+          number: row['unit_number']?.toString() ?? '',
+          type: row['unit_type']?.toString() ?? '',
+          rent: rent?.toString() ?? '0',
+          tenant: '',
+          status: _normalizeLandlordUnitStatus(
+            row['status']?.toString() ?? 'vacant',
+          ),
+          propertyId: row['property_id']?.toString() ?? '',
+          propertyName: widget.landlord.propertyName,
+          description: row['description']?.toString() ?? '',
+        );
+
+        units.add(unit);
+
+        debugPrint(
+          'LANDLORD DASHBOARD UNIT: '
+          'id=${unit.id} '
+          'number=${unit.number} '
+          'status=${unit.status} '
+          'propertyId=${unit.propertyId}',
+        );
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _supabaseUnits = units;
+      });
+
+      debugPrint(
+        'LANDLORD DASHBOARD UNITS: assignedUnits=${_supabaseUnits.length}',
+      );
+    } catch (e, stackTrace) {
+      debugPrint('LANDLORD DASHBOARD UNITS ERROR: $e');
+      debugPrint('LANDLORD DASHBOARD UNITS STACK: $stackTrace');
+
+      if (!mounted) return;
+
+      setState(() {
+        _supabaseUnits = [];
+      });
+    }
+  }
+
+  String _normalizeLandlordUnitStatus(String value) {
+    switch (value.trim().toLowerCase()) {
+      case 'occupied':
+        return 'Occupied';
+
+      case 'under maintenance':
+      case 'maintenance':
+      case 'under_maintenance':
+        return 'Under Maintenance';
+
+      case 'vacant':
+      default:
+        return 'Vacant';
+    }
   }
 
   int get occupiedCount =>
@@ -63,13 +179,22 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
       assignedUnits.where((u) => u.status == 'Under Maintenance').length;
 
   void _openPage(int index) {
+    debugPrint('LANDLORD NAV DEBUG: _openPage called with index=$index');
+
     setState(() {
       _currentIndex = index;
     });
+
+    debugPrint('LANDLORD NAV DEBUG: currentIndex changed to $_currentIndex');
   }
 
   @override
   Widget build(BuildContext context) {
+    debugPrint(
+      'LANDLORD DASHBOARD BUILD: currentIndex=$_currentIndex | '
+      'booking page included=${true}',
+    );
+
     final pages = [
       _buildDashboard(),
       LandlordBookingPage(landlord: widget.landlord),
@@ -88,10 +213,7 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
     ];
 
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: pages,
-      ),
+      body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: NavigationBar(
         height: 68,
         selectedIndex: _currentIndex,
@@ -152,10 +274,7 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
         titleSpacing: 18,
         title: const Text(
           'Landlord',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-          ),
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
         ),
         actions: [
           IconButton(
@@ -225,10 +344,7 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         gradient: const LinearGradient(
-          colors: [
-            Color(0xFF4F46E5),
-            Color(0xFF6366F1),
-          ],
+          colors: [Color(0xFF4F46E5), Color(0xFF6366F1)],
         ),
         boxShadow: [
           BoxShadow(
@@ -260,10 +376,7 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
               children: [
                 const Text(
                   'Welcome back 👋',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11,
-                  ),
+                  style: TextStyle(color: Colors.white70, fontSize: 11),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -278,15 +391,12 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  widget.landlord.apartmentName.isNotEmpty
-                      ? widget.landlord.apartmentName
+                  widget.landlord.propertyName.isNotEmpty
+                      ? widget.landlord.propertyName
                       : 'My Apartment',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11,
-                  ),
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
                 ),
               ],
             ),
@@ -299,10 +409,7 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
   Widget _sectionTitle(String title) {
     return Text(
       title,
-      style: const TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w700,
-      ),
+      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
     );
   }
 
@@ -348,31 +455,17 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
     );
   }
 
-  Widget _overviewCard(
-    String label,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
+  Widget _overviewCard(String label, String value, IconData icon, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        vertical: 10,
-        horizontal: 4,
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(13),
-        border: Border.all(
-          color: color.withValues(alpha: 0.12),
-        ),
+        border: Border.all(color: color.withValues(alpha: 0.12)),
       ),
       child: Column(
         children: [
-          Icon(
-            icon,
-            size: 18,
-            color: color,
-          ),
+          Icon(icon, size: 18, color: color),
           const SizedBox(height: 5),
           Text(
             value,
@@ -442,9 +535,8 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => LandlordAnnouncementsPage(
-                landlord: widget.landlord,
-              ),
+              builder: (_) =>
+                  LandlordAnnouncementsPage(landlord: widget.landlord),
             ),
           );
         },
@@ -478,18 +570,12 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
             decoration: BoxDecoration(
               color: action.color.withValues(alpha: 0.07),
               borderRadius: BorderRadius.circular(13),
-              border: Border.all(
-                color: action.color.withValues(alpha: 0.10),
-              ),
+              border: Border.all(color: action.color.withValues(alpha: 0.10)),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  action.icon,
-                  size: 20,
-                  color: action.color,
-                ),
+                Icon(action.icon, size: 20, color: action.color),
                 const SizedBox(height: 5),
                 Text(
                   action.title,
@@ -535,8 +621,8 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      widget.landlord.apartmentName.isNotEmpty
-                          ? widget.landlord.apartmentName
+                      widget.landlord.propertyName.isNotEmpty
+                          ? widget.landlord.propertyName
                           : 'My Apartment',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -556,10 +642,7 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
                   ],
                 ),
               ),
-              const Icon(
-                Icons.chevron_right,
-                size: 20,
-              ),
+              const Icon(Icons.chevron_right, size: 20),
             ],
           ),
         ),
@@ -574,17 +657,14 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
     final Color statusColor = isOccupied
         ? const Color(0xFF059669)
         : isMaintenance
-            ? const Color(0xFFDC2626)
-            : const Color(0xFFF59E0B);
+        ? const Color(0xFFDC2626)
+        : const Color(0xFFF59E0B);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 7),
       child: ListTile(
         dense: true,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 11,
-          vertical: 1,
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 11, vertical: 1),
         leading: Container(
           width: 34,
           height: 34,
@@ -596,28 +676,19 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
             isOccupied
                 ? Icons.person_outline
                 : isMaintenance
-                    ? Icons.build_outlined
-                    : Icons.home_outlined,
+                ? Icons.build_outlined
+                : Icons.home_outlined,
             size: 18,
             color: statusColor,
           ),
         ),
         title: Text(
           'Unit ${unit.number}',
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
         ),
-        subtitle: Text(
-          unit.type,
-          style: const TextStyle(fontSize: 10),
-        ),
+        subtitle: Text(unit.type, style: const TextStyle(fontSize: 10)),
         trailing: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 7,
-            vertical: 4,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
           decoration: BoxDecoration(
             color: statusColor.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(20),
@@ -649,19 +720,13 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
             const SizedBox(height: 7),
             const Text(
               'No units yet',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 3),
             Text(
               'Your assigned apartment units will appear here.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 10,
-                color: Colors.grey.shade600,
-              ),
+              style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
             ),
           ],
         ),
@@ -676,10 +741,5 @@ class _QuickAction {
   final Color color;
   final VoidCallback onTap;
 
-  const _QuickAction(
-    this.title,
-    this.icon,
-    this.color,
-    this.onTap,
-  );
+  const _QuickAction(this.title, this.icon, this.color, this.onTap);
 }

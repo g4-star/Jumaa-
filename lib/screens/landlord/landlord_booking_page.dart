@@ -24,6 +24,10 @@ class _LandlordBookingPageState extends State<LandlordBookingPage> {
   @override
   void initState() {
     super.initState();
+
+    debugPrint('LANDLORD BOOKINGS PAGE: INIT STATE REACHED');
+    debugPrint('LANDLORD BOOKINGS PAGE: landlord=${widget.landlord.fullName}');
+
     _loadBookings();
   }
 
@@ -37,6 +41,11 @@ class _LandlordBookingPageState extends State<LandlordBookingPage> {
 
     try {
       final userId = _supabase.auth.currentUser?.id;
+
+      debugPrint('LANDLORD BOOKINGS DEBUG: auth userId=$userId');
+      debugPrint(
+        'LANDLORD BOOKINGS DEBUG: auth email=${_supabase.auth.currentUser?.email}',
+      );
 
       if (userId == null) {
         throw Exception('You must be logged in to view bookings.');
@@ -53,6 +62,11 @@ class _LandlordBookingPageState extends State<LandlordBookingPage> {
           .select('id, name')
           .eq('landlord_id', userId);
 
+      debugPrint(
+        'LANDLORD BOOKINGS DEBUG: properties count=${properties.length}',
+      );
+      debugPrint('LANDLORD BOOKINGS DEBUG: properties=$properties');
+
       if (properties.isEmpty) {
         if (!mounted) return;
 
@@ -67,6 +81,8 @@ class _LandlordBookingPageState extends State<LandlordBookingPage> {
       final propertyIds = properties
           .map((row) => row['id'].toString())
           .toList();
+
+      debugPrint('LANDLORD BOOKINGS DEBUG: propertyIds=$propertyIds');
 
       final response = await _supabase
           .from('booking_requests')
@@ -85,6 +101,13 @@ class _LandlordBookingPageState extends State<LandlordBookingPage> {
           .inFilter('property_id', propertyIds)
           .order('created_at', ascending: false);
 
+      debugPrint(
+        'LANDLORD BOOKINGS DEBUG: booking_requests count=${response.length}',
+      );
+      debugPrint(
+        'LANDLORD BOOKINGS DEBUG: booking_requests response=$response',
+      );
+
       if (!mounted) return;
 
       setState(() {
@@ -101,95 +124,354 @@ class _LandlordBookingPageState extends State<LandlordBookingPage> {
     }
   }
 
-  Future<void> _updateBookingStatus(
-    String bookingId,
-    String status,
-  ) async {
+  Future<void> _updateBookingStatus(String bookingId, String status) async {
     try {
-      // Find the booking before updating it so we have the applicant's
-      // email/name/property information available for the notification.
+      // Find the booking locally so we have all applicant information.
       final booking = _bookings.cast<Map<String, dynamic>?>().firstWhere(
-            (item) => item?['id']?.toString() == bookingId,
-            orElse: () => null,
-          );
+        (item) => item?['id']?.toString() == bookingId,
+        orElse: () => null,
+      );
 
       if (booking == null) {
         throw Exception('Booking request could not be found.');
       }
 
+      final applicantName = booking['applicant_name']?.toString().trim() ?? '';
+
       final applicantEmail =
-          booking['applicant_email']?.toString().trim() ?? '';
+          booking['applicant_email']?.toString().trim().toLowerCase() ?? '';
 
-      final applicantName =
-          booking['applicant_name']?.toString().trim() ?? 'Applicant';
+      final applicantPhone =
+          booking['applicant_phone']?.toString().trim() ?? '';
 
-      final propertyId =
-          booking['property_id']?.toString().trim() ?? '';
+      final propertyId = booking['property_id']?.toString().trim() ?? '';
 
-      // Get the property name for the email.
-      var propertyName = 'your requested property';
+      final unitId = booking['unit_id']?.toString().trim() ?? '';
 
-      if (propertyId.isNotEmpty) {
-        final property = await _supabase
-            .from('properties')
-            .select('name')
-            .eq('id', propertyId)
-            .maybeSingle();
-
-        if (property != null &&
-            property['name']?.toString().trim().isNotEmpty == true) {
-          propertyName = property['name'].toString().trim();
-        }
+      if (applicantName.isEmpty ||
+          applicantEmail.isEmpty ||
+          applicantPhone.isEmpty ||
+          propertyId.isEmpty ||
+          unitId.isEmpty) {
+        throw Exception(
+          'The booking is missing applicant, property or unit information.',
+        );
       }
 
-      // ----------------------------------------------------------
-      // 1. Update the booking status in Supabase.
-      // ----------------------------------------------------------
-      await _supabase
-          .from('booking_requests')
-          .update({'status': status})
-          .eq('id', bookingId);
+      // Get the property name for notification emails.
+      var propertyName = 'your requested property';
 
-      // ----------------------------------------------------------
-      // 2. Send the decision email.
-      //
-      // Email failure must NOT undo/report the database update
-      // as a failed booking decision.
-      // ----------------------------------------------------------
-      String? emailError;
+      final property = await _supabase
+          .from('properties')
+          .select('name')
+          .eq('id', propertyId)
+          .maybeSingle();
 
-      if (applicantEmail.isNotEmpty &&
-          (status == 'approved' || status == 'rejected')) {
+      if (property != null &&
+          property['name']?.toString().trim().isNotEmpty == true) {
+        propertyName = property['name'].toString().trim();
+      }
+
+      // ==========================================================
+      // APPROVAL
+      // ==========================================================
+      if (status == 'approved') {
+        // ----------------------------------------------------------
+        // 1. Check whether this booking already created a tenant.
+        // ----------------------------------------------------------
+        final existingBookingTenant = await _supabase
+            .from('tenants')
+            .select('id, auth_user_id, full_name, email, phone, account_status')
+            .eq('booking_request_id', bookingId)
+            .maybeSingle();
+
+        String tenantId;
+
+        if (existingBookingTenant != null) {
+          tenantId = existingBookingTenant['id']?.toString() ?? '';
+
+          if (tenantId.isEmpty) {
+            throw Exception(
+              'An existing tenant record was found for this booking, '
+              'but its tenant ID is missing.',
+            );
+          }
+
+          // If this booking already has a fully linked Auth account,
+          // do not create another account.
+          final existingAuthUserId =
+              existingBookingTenant['auth_user_id']?.toString() ?? '';
+
+          if (existingAuthUserId.isNotEmpty) {
+            // ------------------------------------------------------
+            // IMPORTANT:
+            // The tenant record may already exist because the
+            // tenant account was created previously. In that case,
+            // approval must still synchronize the tenant's
+            // property_id and unit_id from this booking.
+            // ------------------------------------------------------
+            final updatedTenant = await _supabase
+                .from('tenants')
+                .update({
+                  'property_id': propertyId,
+                  'unit_id': unitId,
+                  'account_status': 'active',
+                })
+                .eq('id', tenantId)
+                .select('id, property_id, unit_id, account_status')
+                .maybeSingle();
+
+            debugPrint(
+              'LANDLORD BOOKINGS: existing tenant assignment synced: '
+              '$updatedTenant',
+            );
+
+            if (updatedTenant == null) {
+              throw Exception(
+                'Tenant account exists, but the tenant could not be '
+                'assigned to the approved property and unit.',
+              );
+            }
+
+            await _supabase
+                .from('booking_requests')
+                .update({'status': 'approved'})
+                .eq('id', bookingId);
+
+            // Synchronize the booked unit with the approved booking.
+            if (unitId.isNotEmpty) {
+              final updatedUnits = await _supabase
+                  .from('units')
+                  .update({'status': 'occupied'})
+                  .eq('id', unitId)
+                  .select('id, status');
+
+              debugPrint(
+                'LANDLORD BOOKINGS: occupancy sync result=$updatedUnits',
+              );
+
+              if (updatedUnits.isEmpty) {
+                debugPrint(
+                  'LANDLORD BOOKINGS WARNING: unit $unitId was not updated.',
+                );
+              }
+            } else {
+              debugPrint(
+                'LANDLORD BOOKINGS WARNING: approved booking has empty unit_id.',
+              );
+            }
+
+            if (!mounted) return;
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'This booking is already approved and the tenant account already exists.',
+                ),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+
+            await _loadBookings();
+            return;
+          }
+        } else {
+          // --------------------------------------------------------
+          // 2. Make sure another tenant is not occupying this unit.
+          // --------------------------------------------------------
+          final existingUnitTenant = await _supabase
+              .from('tenants')
+              .select(
+                'id, booking_request_id, full_name, email, account_status',
+              )
+              .eq('unit_id', unitId)
+              .maybeSingle();
+
+          if (existingUnitTenant != null) {
+            final otherBookingId =
+                existingUnitTenant['booking_request_id']?.toString() ?? '';
+
+            if (otherBookingId.isEmpty || otherBookingId != bookingId) {
+              throw Exception('This unit already has a tenant assigned to it.');
+            }
+          }
+
+          // --------------------------------------------------------
+          // 3. Create the tenant record from the approved booking.
+          // --------------------------------------------------------
+          final tenantResponse = await _supabase
+              .from('tenants')
+              .insert({
+                'booking_request_id': bookingId,
+                'property_id': propertyId,
+                'unit_id': unitId,
+                'full_name': applicantName,
+                'email': applicantEmail,
+                'phone': applicantPhone,
+                'account_status': 'active',
+              })
+              .select()
+              .single();
+
+          tenantId = tenantResponse['id']?.toString() ?? '';
+
+          if (tenantId.isEmpty) {
+            throw Exception(
+              'Tenant was created but no tenant ID was returned.',
+            );
+          }
+        }
+
+        // ----------------------------------------------------------
+        // 4. Create Supabase Auth account + profile + invitation.
+        // ----------------------------------------------------------
+        final accountResponse = await _supabase.functions.invoke(
+          'create-tenant-account',
+          body: {
+            'tenant_id': tenantId,
+            'full_name': applicantName,
+            'email': applicantEmail,
+            'phone': applicantPhone,
+            'apartment': unitId,
+          },
+        );
+
+        final accountData = accountResponse.data;
+
+        if (accountResponse.status != 200) {
+          String accountError = 'Tenant account could not be created.';
+
+          if (accountData is Map && accountData['error'] != null) {
+            accountError = accountData['error'].toString();
+          }
+
+          throw Exception(accountError);
+        }
+
+        if (accountData is! Map || accountData['success'] != true) {
+          throw Exception(
+            accountData is Map && accountData['error'] != null
+                ? accountData['error'].toString()
+                : 'Tenant account could not be created.',
+          );
+        }
+
+        if (accountData['email_sent'] == false) {
+          throw Exception(
+            'Tenant account was created, but the invitation email could not be sent.',
+          );
+        }
+
+        // ----------------------------------------------------------
+        // 5. Mark the booking as approved.
+        // ----------------------------------------------------------
+        await _supabase
+            .from('booking_requests')
+            .update({'status': 'approved'})
+            .eq('id', bookingId);
+
+        // ----------------------------------------------------------
+        // 6. Synchronize the booked unit.
+        // ----------------------------------------------------------
+        // booking_requests.unit_id points directly to units.id.
+        // An approved booking means this unit is now occupied.
+        if (unitId.isNotEmpty) {
+          final updatedUnits = await _supabase
+              .from('units')
+              .update({'status': 'occupied'})
+              .eq('id', unitId)
+              .select('id, status');
+
+          debugPrint(
+            'LANDLORD BOOKINGS: occupancy sync result=$updatedUnits',
+          );
+
+          if (updatedUnits.isEmpty) {
+            debugPrint(
+              'LANDLORD BOOKINGS WARNING: unit $unitId was not updated.',
+            );
+          }
+        } else {
+          debugPrint(
+            'LANDLORD BOOKINGS WARNING: approved booking has empty unit_id.',
+          );
+        }
+
+        // ----------------------------------------------------------
+        // 7. Send the booking approval notification.
+        // ----------------------------------------------------------
+        String? emailError;
+
         try {
           await EmailService.sendBookingDecision(
             applicantEmail: applicantEmail,
             applicantName: applicantName,
             propertyName: propertyName,
-            approved: status == 'approved',
+            approved: true,
           );
         } catch (e) {
           emailError = e.toString();
         }
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              emailError == null
+                  ? 'Booking approved. Tenant account created and invitation sent.'
+                  : 'Booking approved. Tenant account created, but booking notification failed.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+
+        await _loadBookings();
+        return;
       }
 
-      if (!mounted) return;
+      // ==========================================================
+      // REJECTION
+      // ==========================================================
+      if (status == 'rejected') {
+        await _supabase
+            .from('booking_requests')
+            .update({'status': 'rejected'})
+            .eq('id', bookingId);
 
-      final statusMessage = status == 'approved'
-          ? 'Booking approved.'
-          : 'Booking rejected.';
+        String? emailError;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            emailError == null
-                ? statusMessage
-                : '$statusMessage Email notification failed.',
+        if (applicantEmail.isNotEmpty) {
+          try {
+            await EmailService.sendBookingDecision(
+              applicantEmail: applicantEmail,
+              applicantName: applicantName,
+              propertyName: propertyName,
+              approved: false,
+            );
+          } catch (e) {
+            emailError = e.toString();
+          }
+        }
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              emailError == null
+                  ? 'Booking rejected.'
+                  : 'Booking rejected. Email notification failed.',
+            ),
+            behavior: SnackBarBehavior.floating,
           ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+        );
 
-      await _loadBookings();
+        await _loadBookings();
+        return;
+      }
+
+      throw Exception('Unsupported booking status: $status');
     } catch (e) {
       if (!mounted) return;
 
@@ -575,7 +857,7 @@ class _LandlordBookingPageState extends State<LandlordBookingPage> {
 
   @override
   Widget build(BuildContext context) {
-    final apartmentName = widget.landlord.apartmentName.trim();
+    final apartmentName = widget.landlord.propertyName.trim();
 
     return Scaffold(
       appBar: AppBar(

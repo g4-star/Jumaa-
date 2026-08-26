@@ -46,3 +46,11 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Local backup files
+*.backup
+*.bak
+*.backup-*
+*.backup_*
+*.before_*
+*.before-*

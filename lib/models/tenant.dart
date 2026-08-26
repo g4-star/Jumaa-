@@ -1,5 +1,6 @@
 class Tenant {
   String id;
+  String authUserId;
   String bookingRequestId;
   String propertyId;
   String unitId;
@@ -14,6 +15,7 @@ class Tenant {
 
   Tenant({
     this.id = '',
+    this.authUserId = '',
     this.bookingRequestId = '',
     this.propertyId = '',
     this.unitId = '',

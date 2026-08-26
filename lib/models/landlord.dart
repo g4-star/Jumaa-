@@ -5,8 +5,8 @@ class Landlord {
   String phone;
   String temporaryPassword;
   bool mustResetPassword;
-  String apartmentName;
-  String apartmentId;
+  String propertyName;
+  String propertyId;
 
   Landlord({
     required this.id,
@@ -15,7 +15,7 @@ class Landlord {
     required this.phone,
     required this.temporaryPassword,
     required this.mustResetPassword,
-    required this.apartmentName,
-    this.apartmentId = '',
+    required this.propertyName,
+    this.propertyId = '',
   });
 }

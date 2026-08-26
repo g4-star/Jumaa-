@@ -25,11 +25,11 @@ class _LandlordApartmentPageState
   late TextEditingController _descriptionController;
 
   List<Apartment> get units {
-    if (widget.landlord.apartmentId.isNotEmpty) {
+    if (widget.landlord.propertyId.isNotEmpty) {
       final byId = OpenNestStore.apartments
           .where(
             (unit) =>
-                unit.propertyId == widget.landlord.apartmentId,
+                unit.propertyId == widget.landlord.propertyId,
           )
           .toList();
 
@@ -38,12 +38,12 @@ class _LandlordApartmentPageState
       }
     }
 
-    if (widget.landlord.apartmentName.isNotEmpty) {
+    if (widget.landlord.propertyName.isNotEmpty) {
       return OpenNestStore.apartments
           .where(
             (unit) =>
                 unit.propertyName.trim().toLowerCase() ==
-                widget.landlord.apartmentName.trim().toLowerCase(),
+                widget.landlord.propertyName.trim().toLowerCase(),
           )
           .toList();
     }
@@ -102,8 +102,8 @@ class _LandlordApartmentPageState
       unit.description = description;
     }
 
-    final propertyId = widget.landlord.apartmentId.isNotEmpty
-        ? widget.landlord.apartmentId
+    final propertyId = widget.landlord.propertyId.isNotEmpty
+        ? widget.landlord.propertyId
         : units.first.propertyId;
 
     await OpenNestStore.savePropertyDescription(
@@ -127,8 +127,8 @@ class _LandlordApartmentPageState
 
   @override
   Widget build(BuildContext context) {
-    final apartmentName = widget.landlord.apartmentName.isNotEmpty
-        ? widget.landlord.apartmentName
+    final apartmentName = widget.landlord.propertyName.isNotEmpty
+        ? widget.landlord.propertyName
         : (units.isNotEmpty ? units.first.propertyName : 'My Apartment');
 
     return Scaffold(
@@ -161,7 +161,7 @@ class _LandlordApartmentPageState
             const SizedBox(height: 6),
 
             Text(
-              widget.landlord.apartmentId.isNotEmpty
+              widget.landlord.propertyId.isNotEmpty
                   ? 'Assigned apartment'
                   : 'Apartment',
               style: TextStyle(
