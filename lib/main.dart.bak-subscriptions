@@ -7,7 +7,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
@@ -19,7 +18,6 @@ import 'models/landlord.dart';
 import 'models/tenant.dart';
 import 'screens/admin/admin_dashboard.dart';
 import 'screens/landlord/landlord_dashboard.dart';
-import 'screens/jumaa_owner/jumaa_owner_dashboard.dart';
 import 'services/booking_service.dart';
 
 // ============================================================
@@ -460,20 +458,7 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
       }
 
       // ----------------------------------------------------------
-      // VALIDATE JUMAA OWNER SESSION
-      // ----------------------------------------------------------
-      if (role == 'jumaa_owner') {
-        if (mounted) {
-          setState(() {
-            _loggedIn = true;
-            _loading = false;
-          });
-          return;
-        }
-      }
-
-      // ----------------------------------------------------------
-      // VALIDATE PROPERTY OWNER SESSION
+      // VALIDATE OWNER SESSION
       // ----------------------------------------------------------
       if (role == 'owner' || role == null || role.isEmpty) {
         await OpenNestStore.loadOwners();
@@ -689,1229 +674,24 @@ class _DashboardPageState extends State<DashboardPage> {
 
 // Temporary page.
 // We will replace this with the real subscription system next.
-class _SubscriptionsPlaceholderPage extends StatefulWidget {
+class _SubscriptionsPlaceholderPage extends StatelessWidget {
   const _SubscriptionsPlaceholderPage();
-
-  @override
-  State<_SubscriptionsPlaceholderPage> createState() =>
-      _SubscriptionsPlaceholderPageState();
-}
-
-class _SubscriptionsPlaceholderPageState
-    extends State<_SubscriptionsPlaceholderPage> {
-  bool _loading = true;
-  bool _paying = false;
-
-  Property? _property;
-  Map<String, dynamic>? _subscription;
-  List<Map<String, dynamic>> _payments = [];
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSubscription();
-  }
-
-  Future<void> _loadSubscription() async {
-    if (!mounted) return;
-
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
-    try {
-      final user = OpenNestStore.supabase.auth.currentUser;
-
-      if (user == null) {
-        throw Exception('You are not signed in.');
-      }
-
-      Property? property;
-
-      for (final candidate in OpenNestStore.properties) {
-        if (candidate.ownerId == user.id) {
-          property = candidate;
-          break;
-        }
-      }
-
-      if (property == null) {
-        await OpenNestStore.loadPropertiesFromSupabase();
-
-        for (final candidate in OpenNestStore.properties) {
-          if (candidate.ownerId == user.id) {
-            property = candidate;
-            break;
-          }
-        }
-      }
-
-      if (property == null) {
-        throw Exception('No property was found for your owner account.');
-      }
-
-      final response = await OpenNestStore.supabase
-          .from('subscriptions')
-          .select()
-          .eq('owner_id', user.id)
-          .eq('property_id', property.id)
-          .maybeSingle();
-
-      if (response == null) {
-        throw Exception('No subscription exists for ${property.name}.');
-      }
-
-      final paymentResponse = await OpenNestStore.supabase
-          .from('subscription_payments')
-          .select()
-          .eq('owner_id', user.id)
-          .eq('property_id', property.id)
-          .order('created_at', ascending: false)
-          .limit(20);
-
-      final payments = (paymentResponse as List)
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList();
-
-      if (!mounted) return;
-
-      setState(() {
-        _property = property;
-        _subscription = Map<String, dynamic>.from(response);
-        _payments = payments;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _loading = false;
-        _error = e.toString().replaceFirst('Exception: ', '');
-      });
-    }
-  }
-
-  int get _unitCount {
-    final value = _subscription?['unit_count'];
-
-    if (value is num) {
-      return value.toInt();
-    }
-
-    return int.tryParse(value?.toString() ?? '') ??
-        OpenNestStore.apartments
-            .where((unit) => unit.propertyId == _property?.id)
-            .length;
-  }
-
-  double get _monthlyAmount {
-    final value = _subscription?['monthly_amount'];
-
-    if (value is num) {
-      return value.toDouble();
-    }
-
-    return double.tryParse(value?.toString() ?? '') ?? 0;
-  }
-
-  String get _status {
-    return (_subscription?['status']?.toString() ?? 'unknown').toUpperCase();
-  }
-
-  String _formatDate(dynamic value) {
-    if (value == null) return '—';
-
-    final date = DateTime.tryParse(value.toString());
-
-    if (date == null) return value.toString();
-
-    const months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-
-    return '${date.day} ${months[date.month - 1]} ${date.year}';
-  }
-
-  Color _statusColor() {
-    switch (_status) {
-      case 'ACTIVE':
-        return Colors.green;
-      case 'TRIAL':
-        return Colors.orange;
-      case 'EXPIRED':
-      case 'PAST_DUE':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  Future<void> _payWithPaystack() async {
-    if (_paying) return;
-
-    final user = OpenNestStore.supabase.auth.currentUser;
-
-    if (user == null) {
-      _showMessage('You are not signed in.', isError: true);
-      return;
-    }
-
-    final property = _property;
-
-    if (property == null) {
-      _showMessage('No property is available for payment.', isError: true);
-      return;
-    }
-
-    if (_monthlyAmount <= 0) {
-      _showMessage(
-        'The subscription has an invalid monthly amount.',
-        isError: true,
-      );
-      return;
-    }
-
-    final email = user.email?.trim();
-
-    if (email == null || email.isEmpty) {
-      _showMessage(
-        'Your account does not have an email address for Paystack.',
-        isError: true,
-      );
-      return;
-    }
-
-    setState(() {
-      _paying = true;
-    });
-
-    try {
-      final response = await OpenNestStore.supabase.functions.invoke(
-        'initialize-subscription-payment',
-        body: {
-          'owner_id': user.id,
-          'property_id': property.id,
-          'amount': _monthlyAmount,
-          'email': email,
-        },
-      );
-
-      final data = response.data;
-
-      if (response.status != 200 || data is! Map || data['success'] != true) {
-        throw Exception(
-          data is Map && data['error'] != null
-              ? data['error'].toString()
-              : 'Could not initialize the Paystack payment.',
-        );
-      }
-
-      final authorizationUrl = data['authorization_url']?.toString();
-
-      if (authorizationUrl == null || authorizationUrl.trim().isEmpty) {
-        throw Exception('Paystack did not return a checkout URL.');
-      }
-
-      final uri = Uri.tryParse(authorizationUrl);
-
-      if (uri == null ||
-          !uri.hasScheme ||
-          (uri.scheme != 'https' && uri.scheme != 'http')) {
-        throw Exception('Paystack returned an invalid checkout URL.');
-      }
-
-      final launched = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
-
-      if (!launched) {
-        throw Exception('Could not open Paystack checkout.');
-      }
-
-      if (!mounted) return;
-
-      _showMessage('Paystack checkout opened. Complete the payment there.');
-
-      await Future.delayed(const Duration(seconds: 3));
-
-      if (mounted) {
-        await _loadSubscription();
-      }
-    } catch (e) {
-      if (!mounted) return;
-
-      _showMessage(
-        'Payment could not be started: '
-        '${e.toString().replaceFirst('Exception: ', '')}',
-        isError: true,
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _paying = false;
-        });
-      }
-    }
-  }
-
-  void _showMessage(String message, {bool isError = false}) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? Colors.red : null,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  Widget _infoRow(String label, String value) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(label, style: TextStyle(color: Colors.grey.shade600)),
-        ),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
-      ],
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Subscriptions',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _loading || _paying ? null : _loadSubscription,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      body: _buildBody(),
-    );
-  }
-
-  Widget _buildBody() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.error_outline, size: 60, color: Colors.red),
-              const SizedBox(height: 16),
-              const Text(
-                'Unable to load subscription',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(_error!, textAlign: TextAlign.center),
-              const SizedBox(height: 20),
-              FilledButton.icon(
-                onPressed: _loadSubscription,
-                icon: const Icon(Icons.refresh),
-                label: const Text('TRY AGAIN'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final property = _property;
-    final subscription = _subscription;
-
-    if (property == null || subscription == null) {
-      return const Center(
-        child: Text('No subscription information available.'),
-      );
-    }
-
-    final statusColor = _statusColor();
-
-    return RefreshIndicator(
-      onRefresh: _loadSubscription,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            elevation: 0,
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 27,
-                    child: const Icon(Icons.apartment, size: 28),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          property.name,
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '$_unitCount units',
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          Card(
-            elevation: 0,
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'JUMAA SUBSCRIPTION',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-
-                  Row(
-                    children: [
-                      const Expanded(child: Text('Current status')),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: statusColor.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          _status,
-                          style: TextStyle(
-                            color: statusColor,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const Divider(height: 28),
-
-                  _infoRow(
-                    'Monthly plan',
-                    'KES ${_monthlyAmount.toStringAsFixed(0)}',
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  _infoRow('Units covered', _unitCount.toString()),
-
-                  const SizedBox(height: 12),
-
-                  _infoRow(
-                    'Trial ends',
-                    _formatDate(subscription['trial_ends_at']),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  _infoRow(
-                    'Subscription starts',
-                    _formatDate(subscription['subscription_starts_at']),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  _infoRow(
-                    'Subscription ends',
-                    _formatDate(subscription['subscription_ends_at']),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          Card(
-            elevation: 0,
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Subscription payment',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Pay your JUMAA subscription securely through Paystack.',
-                    style: TextStyle(color: Colors.grey.shade600),
-                  ),
-                  const SizedBox(height: 18),
-
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      color: Theme.of(context)
-                          .colorScheme
-                          .surfaceContainerHighest,
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.payments_outlined),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Text(
-                            'Amount to pay',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                        Text(
-                          'KES ${_monthlyAmount.toStringAsFixed(0)}',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _paying || _monthlyAmount <= 0
-                          ? null
-                          : _payWithPaystack,
-                      icon: _paying
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.lock_outline),
-                      label: Text(
-                        _paying
-                            ? 'OPENING PAYSTACK...'
-                            : _status == 'ACTIVE'
-                            ? 'RENEW WITH PAYSTACK'
-                            : 'PAY WITH PAYSTACK',
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  Text(
-                    'Only the property owner/admin can make '
-                    'subscription payments.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _payments.isEmpty
-                          ? null
-                          : _showSubscriptionHistory,
-                      icon: const Icon(Icons.history),
-                      label: const Text('VIEW SUBSCRIPTION HISTORY'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          if (_payments.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            _buildLatestReceipt(context),
-          ],
-        ],
-      ),
-    );
-  }
-
-  String _receiptNumber(Map<String, dynamic> payment) {
-    final reference = payment['reference']?.toString() ?? '';
-    final clean = reference.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
-
-    if (clean.isEmpty) {
-      return 'JUMAA-RCP-${payment['id']?.toString().substring(0, 8) ?? '00000000'}';
-    }
-
-    final suffix = clean.length > 12
-        ? clean.substring(clean.length - 12)
-        : clean;
-
-    return 'JUMAA-RCP-$suffix';
-  }
-
-  String _formatDateTime(dynamic value) {
-    if (value == null) return '—';
-
-    final date = DateTime.tryParse(value.toString());
-
-    if (date == null) return value.toString();
-
-    const months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-
-    final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
-    final minute = date.minute.toString().padLeft(2, '0');
-    final period = date.hour >= 12 ? 'PM' : 'AM';
-
-    return '${date.day} ${months[date.month - 1]} ${date.year} '
-        '$hour:$minute $period';
-  }
-
-  Widget _buildLatestReceipt(BuildContext context) {
-    final payment = _payments.first;
-
-    return Card(
-      elevation: 0,
-      child: Padding(
+      appBar: AppBar(title: const Text('Subscriptions')),
+      body: ListView(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.receipt_long_outlined),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Text(
-                    'LATEST RECEIPT',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text(
-                    'PAID',
-                    style: TextStyle(
-                      color: Colors.green,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            const Divider(),
-
-            const SizedBox(height: 14),
-
-            _infoRow('Receipt number', _receiptNumber(payment)),
-
-            const SizedBox(height: 12),
-
-            _infoRow(
-              'Payment date',
-              _formatDateTime(payment['paid_at'] ?? payment['created_at']),
-            ),
-
-            const SizedBox(height: 12),
-
-            _infoRow(
-              'Amount paid',
-              'KES ${_paymentAmount(payment).toStringAsFixed(0)}',
-            ),
-
-            const SizedBox(height: 12),
-
-            _infoRow(
-              'Payment method',
-              (payment['payment_method']?.toString() ?? '—').toUpperCase(),
-            ),
-
-            const SizedBox(height: 12),
-
-            _infoRow('Reference', payment['reference']?.toString() ?? '—'),
-
-            const SizedBox(height: 18),
-
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => _showReceipt(payment),
-                icon: const Icon(Icons.receipt_long),
-                label: const Text('VIEW RECEIPT'),
+        children: const [
+          Card(
+            child: ListTile(
+              leading: Icon(Icons.workspace_premium),
+              title: Text('JUMAA Subscription'),
+              subtitle: Text(
+                'Subscription management will be connected to Supabase here.',
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  double _paymentAmount(Map<String, dynamic> payment) {
-    return double.tryParse(payment['amount']?.toString() ?? '') ?? 0;
-  }
-
-  int _paymentMonths(Map<String, dynamic> payment) {
-    return int.tryParse(payment['months_covered']?.toString() ?? '') ?? 0;
-  }
-
-  void _showSubscriptionHistory() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (context) {
-        return SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.82,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Subscription History',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-
-                  const SizedBox(height: 6),
-
-                  Text(
-                    '${_property?.name ?? 'Property'} • '
-                    '${_payments.length} payment'
-                    '${_payments.length == 1 ? '' : 's'}',
-                    style: TextStyle(color: Colors.grey.shade600),
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  Expanded(
-                    child: _payments.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.receipt_long_outlined,
-                                  size: 56,
-                                  color: Colors.grey.shade400,
-                                ),
-                                const SizedBox(height: 12),
-                                const Text(
-                                  'No payment history yet.',
-                                  style: TextStyle(fontWeight: FontWeight.w600),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            itemCount: _payments.length,
-                            itemBuilder: (context, index) {
-                              final payment = _payments[index];
-
-                              final amount = _paymentAmount(payment);
-
-                              final months = _paymentMonths(payment);
-
-                              final status =
-                                  payment['status']?.toString().toUpperCase() ??
-                                  '—';
-
-                              final paymentDate =
-                                  payment['paid_at'] ?? payment['created_at'];
-
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 14),
-                                child: Card(
-                                  elevation: 0,
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            CircleAvatar(
-                                              child: Icon(
-                                                status == 'SUCCESS'
-                                                    ? Icons.check
-                                                    : Icons.receipt_long,
-                                              ),
-                                            ),
-
-                                            const SizedBox(width: 12),
-
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    _formatDate(paymentDate),
-                                                    style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      fontSize: 16,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 3),
-                                                  Text(
-                                                    '$months month'
-                                                    '${months == 1 ? '' : 's'} • '
-                                                    'Paystack',
-                                                    style: TextStyle(
-                                                      color:
-                                                          Colors.grey.shade600,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-
-                                            Text(
-                                              'KES ${amount.toStringAsFixed(0)}',
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 16,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-
-                                        const SizedBox(height: 14),
-
-                                        const Divider(),
-
-                                        const SizedBox(height: 10),
-
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              status == 'SUCCESS'
-                                                  ? Icons.verified
-                                                  : Icons.info_outline,
-                                              size: 17,
-                                              color: status == 'SUCCESS'
-                                                  ? Colors.green
-                                                  : Colors.grey,
-                                            ),
-                                            const SizedBox(width: 7),
-                                            Text(
-                                              status == 'SUCCESS'
-                                                  ? 'Payment successful'
-                                                  : status,
-                                              style: TextStyle(
-                                                color: status == 'SUCCESS'
-                                                    ? Colors.green
-                                                    : Colors.grey,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-
-                                        const SizedBox(height: 10),
-
-                                        Text(
-                                          'Ref: ${payment['reference'] ?? '—'}',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.grey.shade600,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-
-                                        const SizedBox(height: 12),
-
-                                        SizedBox(
-                                          width: double.infinity,
-                                          child: OutlinedButton.icon(
-                                            onPressed: () {
-                                              Navigator.of(context).pop();
-                                              _showReceipt(payment);
-                                            },
-                                            icon: const Icon(
-                                              Icons.receipt_long,
-                                            ),
-                                            label: const Text('VIEW RECEIPT'),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _showReceipt(Map<String, dynamic> payment) {
-    final amount = _paymentAmount(payment);
-    final months = _paymentMonths(payment);
-    final status = payment['status']?.toString().toUpperCase() ?? '—';
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return Dialog(
-          insetPadding: const EdgeInsets.all(18),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Column(
-                        children: [
-                          CircleAvatar(
-                            radius: 28,
-                            child: Icon(
-                              status == 'SUCCESS'
-                                  ? Icons.check
-                                  : Icons.receipt_long,
-                              size: 30,
-                            ),
-                          ),
-
-                          const SizedBox(height: 12),
-
-                          const Text(
-                            'JUMAA',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 2,
-                            ),
-                          ),
-
-                          const SizedBox(height: 4),
-
-                          const Text(
-                            'SUBSCRIPTION RECEIPT',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.5,
-                            ),
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 7,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              status == 'SUCCESS'
-                                  ? '✓ PAYMENT SUCCESSFUL'
-                                  : status,
-                              style: const TextStyle(
-                                color: Colors.green,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    const Divider(),
-
-                    const SizedBox(height: 14),
-
-                    _receiptRow('Receipt number', _receiptNumber(payment)),
-
-                    _receiptRow(
-                      'Payment date',
-                      _formatDateTime(
-                        payment['paid_at'] ?? payment['created_at'],
-                      ),
-                    ),
-
-                    _receiptRow('Property', _property?.name ?? '—'),
-
-                    _receiptRow(
-                      'Units covered',
-                      payment['units_count']?.toString() ??
-                          _unitCount.toString(),
-                    ),
-
-                    _receiptRow('Billing plan', 'Monthly JUMAA subscription'),
-
-                    _receiptRow(
-                      'Months covered',
-                      '$months month${months == 1 ? '' : 's'}',
-                    ),
-
-                    _receiptRow(
-                      'Payment method',
-                      (payment['payment_method']?.toString() ?? '—')
-                          .toUpperCase(),
-                    ),
-
-                    _receiptRow(
-                      'Transaction reference',
-                      payment['reference']?.toString() ?? '—',
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(18),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        color: Theme.of(dialogContext)
-                            .colorScheme
-                            .surfaceContainerHighest,
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            'AMOUNT PAID',
-                            style: TextStyle(
-                              fontSize: 11,
-                              letterSpacing: 1.2,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-
-                          const SizedBox(height: 6),
-
-                          Text(
-                            'KES ${amount.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    const Text(
-                      'SUBSCRIPTION PERIOD',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _periodBox(
-                            'STARTS',
-                            _formatDate(
-                              _subscription?['subscription_starts_at'],
-                            ),
-                          ),
-                        ),
-
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 8),
-                          child: Icon(Icons.arrow_forward),
-                        ),
-
-                        Expanded(
-                          child: _periodBox(
-                            'ENDS',
-                            _formatDate(_subscription?['subscription_ends_at']),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 22),
-
-                    const Divider(),
-
-                    const SizedBox(height: 12),
-
-                    Center(
-                      child: Text(
-                        'This receipt confirms successful payment '
-                        'of the JUMAA subscription.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        icon: const Icon(Icons.close),
-                        label: const Text('CLOSE'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _receiptRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 13),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Flexible(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _periodBox(String label, String value) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1,
-              color: Colors.grey.shade600,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            value,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
           ),
         ],
       ),
@@ -5222,6 +4002,7 @@ class ApartmentsPage extends StatefulWidget {
 class _ApartmentsPageState extends State<ApartmentsPage> {
   String searchQuery = '';
 
+
   @override
   void initState() {
     super.initState();
@@ -5229,12 +4010,15 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
   }
 
   Future<void> _loadMarketplace() async {
-    if (mounted) {}
+    if (mounted) {
+
+    }
 
     try {
       await OpenNestStore.loadMarketplaceDataFromSupabase();
 
       if (!mounted) return;
+
 
       debugPrint(
         'APARTMENTS PAGE: marketplace loaded: '
@@ -5245,6 +4029,7 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
       debugPrint('APARTMENTS PAGE LOAD ERROR: $e');
 
       if (!mounted) return;
+
     }
   }
 
@@ -7279,7 +6064,10 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
     final propertyName = _value(property['name'], 'My Home');
     final unitNumber = _value(unit['unit_number'], '');
     final unitType = _value(unit['unit_type'], '');
-    final rent = _value(unit['monthly_rent'] ?? unit['rent'], '');
+    final rent = _value(
+      unit['monthly_rent'] ?? unit['rent'],
+      '',
+    );
     final location = _value(property['location'], '');
     final accountStatus = _value(tenant['account_status'], 'active');
 
@@ -7354,7 +6142,10 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
                       const SizedBox(height: 7),
                       const Text(
                         "Here's what's happening with your home.",
-                        style: TextStyle(color: Colors.black54, fontSize: 15),
+                        style: TextStyle(
+                          color: Colors.black54,
+                          fontSize: 15,
+                        ),
                       ),
                     ],
                   ),
@@ -7625,7 +6416,10 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
 
             const Text(
               'Tenant Services',
-              style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w800,
+              ),
             ),
 
             const SizedBox(height: 12),
@@ -7697,7 +6491,11 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
     );
   }
 
-  Widget _emptyHomeMessage(IconData icon, String title, String subtitle) {
+  Widget _emptyHomeMessage(
+    IconData icon,
+    String title,
+    String subtitle,
+  ) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -7758,12 +6556,17 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
       elevation: 1,
       margin: EdgeInsets.zero,
       shadowColor: accent.withValues(alpha: 0.15),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+      ),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 11,
+          ),
           child: Row(
             children: [
               Container(
@@ -7773,7 +6576,11 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
                   color: accent.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(11),
                 ),
-                child: Icon(icon, size: 21, color: accent),
+                child: Icon(
+                  icon,
+                  size: 21,
+                  color: accent,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -14227,32 +13034,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
       }
 
       // ----------------------------------------------------------
-      // JUMAA OWNER LOGIN
-      // ----------------------------------------------------------
-      if (role == 'jumaa_owner') {
-        debugPrint('JUMAA LOGIN: JUMAA Owner account detected.');
-
-        if (!mounted) return;
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('jumaa_logged_in', true);
-        await prefs.setString('jumaa_logged_in_email', email);
-        await prefs.setString('jumaa_logged_in_role', 'jumaa_owner');
-
-        if (!mounted) return;
-
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const JumaaOwnerDashboard(),
-          ),
-        );
-
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // PROPERTY OWNER LOGIN
+      // OWNER LOGIN
       // ----------------------------------------------------------
       if (role == 'owner' || role == null || role.isEmpty) {
         debugPrint('JUMAA LOGIN: Owner account detected.');
