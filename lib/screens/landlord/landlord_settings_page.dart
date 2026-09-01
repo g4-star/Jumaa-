@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/landlord.dart';
 
@@ -9,21 +11,21 @@ class LandlordSettingsPage extends StatefulWidget {
   final Landlord landlord;
   final bool isDarkMode;
   final ValueChanged<bool> onDarkModeChanged;
+  final VoidCallback onLogout;
 
   const LandlordSettingsPage({
     super.key,
     required this.landlord,
     required this.isDarkMode,
     required this.onDarkModeChanged,
+    required this.onLogout,
   });
 
   @override
-  State<LandlordSettingsPage> createState() =>
-      _LandlordSettingsPageState();
+  State<LandlordSettingsPage> createState() => _LandlordSettingsPageState();
 }
 
-class _LandlordSettingsPageState
-    extends State<LandlordSettingsPage> {
+class _LandlordSettingsPageState extends State<LandlordSettingsPage> {
   late TextEditingController _nameController;
   late TextEditingController _phoneController;
 
@@ -33,13 +35,9 @@ class _LandlordSettingsPageState
   void initState() {
     super.initState();
 
-    _nameController = TextEditingController(
-      text: widget.landlord.fullName,
-    );
+    _nameController = TextEditingController(text: widget.landlord.fullName);
 
-    _phoneController = TextEditingController(
-      text: widget.landlord.phone,
-    );
+    _phoneController = TextEditingController(text: widget.landlord.phone);
   }
 
   @override
@@ -77,22 +75,15 @@ class _LandlordSettingsPageState
             left: 20,
             right: 20,
             top: 24,
-            bottom: MediaQuery.of(sheetContext)
-                    .viewInsets
-                    .bottom +
-                24,
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 24,
           ),
           child: SingleChildScrollView(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.stretch,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
                   'Edit Profile',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
 
                 const SizedBox(height: 20),
@@ -102,17 +93,11 @@ class _LandlordSettingsPageState
                     children: [
                       CircleAvatar(
                         radius: 48,
-                        backgroundImage:
-                            _profileImagePath != null
-                                ? FileImage(
-                                    File(_profileImagePath!),
-                                  )
-                                : null,
+                        backgroundImage: _profileImagePath != null
+                            ? FileImage(File(_profileImagePath!))
+                            : null,
                         child: _profileImagePath == null
-                            ? const Icon(
-                                Icons.person,
-                                size: 48,
-                              )
+                            ? const Icon(Icons.person, size: 48)
                             : null,
                       ),
                       Positioned(
@@ -120,10 +105,7 @@ class _LandlordSettingsPageState
                         bottom: 0,
                         child: IconButton.filled(
                           onPressed: _pickProfileImage,
-                          icon: const Icon(
-                            Icons.camera_alt,
-                            size: 18,
-                          ),
+                          icon: const Icon(Icons.camera_alt, size: 18),
                         ),
                       ),
                     ],
@@ -136,9 +118,7 @@ class _LandlordSettingsPageState
                   controller: _nameController,
                   decoration: const InputDecoration(
                     labelText: 'Display name',
-                    prefixIcon: Icon(
-                      Icons.person_outline,
-                    ),
+                    prefixIcon: Icon(Icons.person_outline),
                   ),
                 ),
 
@@ -146,13 +126,10 @@ class _LandlordSettingsPageState
 
                 TextField(
                   controller: _phoneController,
-                  keyboardType:
-                      TextInputType.phone,
+                  keyboardType: TextInputType.phone,
                   decoration: const InputDecoration(
                     labelText: 'Phone number',
-                    prefixIcon: Icon(
-                      Icons.phone_outlined,
-                    ),
+                    prefixIcon: Icon(Icons.phone_outlined),
                   ),
                 ),
 
@@ -160,19 +137,13 @@ class _LandlordSettingsPageState
 
                 FilledButton(
                   onPressed: () {
-                    final name =
-                        _nameController.text.trim();
-                    final phone =
-                        _phoneController.text.trim();
+                    final name = _nameController.text.trim();
+                    final phone = _phoneController.text.trim();
 
-                    if (name.isEmpty ||
-                        phone.isEmpty) {
-                      ScaffoldMessenger.of(context)
-                          .showSnackBar(
+                    if (name.isEmpty || phone.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text(
-                            'Name and phone number are required.',
-                          ),
+                          content: Text('Name and phone number are required.'),
                         ),
                       );
                       return;
@@ -185,18 +156,13 @@ class _LandlordSettingsPageState
 
                     Navigator.pop(sheetContext);
 
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(
+                    ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text(
-                          'Profile updated successfully.',
-                        ),
+                        content: Text('Profile updated successfully.'),
                       ),
                     );
                   },
-                  child: const Text(
-                    'Save Changes',
-                  ),
+                  child: const Text('Save Changes'),
                 ),
               ],
             ),
@@ -206,13 +172,57 @@ class _LandlordSettingsPageState
     );
   }
 
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Log out?'),
+          content: const Text(
+            'Are you sure you want to log out of your JUMAA account?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('LOG OUT'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await Supabase.instance.client.auth.signOut();
+
+      final prefs = await SharedPreferences.getInstance();
+
+      await prefs.remove('jumaa_logged_in');
+      await prefs.remove('jumaa_logged_in_email');
+      await prefs.remove('jumaa_logged_in_role');
+
+      if (!mounted) return;
+
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Unable to log out: $e')));
+    }
+  }
+
   void _showAbout() {
     showAboutDialog(
       context: context,
       applicationName: 'JUMAA',
       applicationVersion: '1.0.0',
-      applicationLegalese:
-          '© JUMAA',
+      applicationLegalese: '© JUMAA',
       children: const [
         SizedBox(height: 16),
         Text(
@@ -250,9 +260,7 @@ class _LandlordSettingsPageState
       appBar: AppBar(
         title: const Text(
           'Settings',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
       body: ListView(
@@ -261,28 +269,19 @@ class _LandlordSettingsPageState
           Card(
             child: ListTile(
               leading: CircleAvatar(
-                backgroundImage:
-                    _profileImagePath != null
-                        ? FileImage(
-                            File(_profileImagePath!),
-                          )
-                        : null,
+                backgroundImage: _profileImagePath != null
+                    ? FileImage(File(_profileImagePath!))
+                    : null,
                 child: _profileImagePath == null
                     ? const Icon(Icons.person)
                     : null,
               ),
               title: Text(
                 widget.landlord.fullName,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                ),
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              subtitle: Text(
-                widget.landlord.email,
-              ),
-              trailing: const Icon(
-                Icons.chevron_right,
-              ),
+              subtitle: Text(widget.landlord.email),
+              trailing: const Icon(Icons.chevron_right),
               onTap: _editProfile,
             ),
           ),
@@ -291,10 +290,7 @@ class _LandlordSettingsPageState
 
           const Text(
             'Appearance',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
 
           const SizedBox(height: 10),
@@ -303,12 +299,8 @@ class _LandlordSettingsPageState
             child: SwitchListTile(
               value: widget.isDarkMode,
               onChanged: widget.onDarkModeChanged,
-              title: const Text(
-                'Dark mode',
-              ),
-              subtitle: const Text(
-                'Use dark appearance throughout the app.',
-              ),
+              title: const Text('Dark mode'),
+              subtitle: const Text('Use dark appearance throughout the app.'),
               secondary: Icon(
                 widget.isDarkMode
                     ? Icons.dark_mode_outlined
@@ -321,10 +313,7 @@ class _LandlordSettingsPageState
 
           const Text(
             'Account',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
 
           const SizedBox(height: 10),
@@ -333,18 +322,12 @@ class _LandlordSettingsPageState
             child: Column(
               children: [
                 ListTile(
-                  leading: const Icon(
-                    Icons.person_outline,
-                  ),
-                  title: const Text(
-                    'Edit Profile',
-                  ),
+                  leading: const Icon(Icons.person_outline),
+                  title: const Text('Edit Profile'),
                   subtitle: const Text(
                     'Change your display name, phone and image.',
                   ),
-                  trailing: const Icon(
-                    Icons.chevron_right,
-                  ),
+                  trailing: const Icon(Icons.chevron_right),
                   onTap: _editProfile,
                 ),
               ],
@@ -355,10 +338,7 @@ class _LandlordSettingsPageState
 
           const Text(
             'Information & Help',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
 
           const SizedBox(height: 10),
@@ -367,34 +347,60 @@ class _LandlordSettingsPageState
             child: Column(
               children: [
                 ListTile(
-                  leading: const Icon(
-                    Icons.info_outline,
-                  ),
-                  title: const Text(
-                    'About',
-                  ),
-                  trailing: const Icon(
-                    Icons.chevron_right,
-                  ),
+                  leading: const Icon(Icons.info_outline),
+                  title: const Text('About'),
+                  trailing: const Icon(Icons.chevron_right),
                   onTap: _showAbout,
                 ),
                 const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(
-                    Icons.support_agent_outlined,
-                  ),
-                  title: const Text(
-                    'Support',
-                  ),
-                  subtitle: const Text(
-                    'Get help with JUMAA.',
-                  ),
-                  trailing: const Icon(
-                    Icons.chevron_right,
-                  ),
+                  leading: const Icon(Icons.support_agent_outlined),
+                  title: const Text('Support'),
+                  subtitle: const Text('Get help with JUMAA.'),
+                  trailing: const Icon(Icons.chevron_right),
                   onTap: _showSupport,
                 ),
               ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          const Text(
+            'Account',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+
+          const SizedBox(height: 10),
+
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text(
+                'Log Out',
+                style: TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              subtitle: const Text('Sign out of your JUMAA account.'),
+              trailing: const Icon(Icons.chevron_right, color: Colors.red),
+              onTap: _logout,
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.logout_rounded),
+              title: const Text(
+                'Logout',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text('Sign out of your landlord account.'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: widget.onLogout,
             ),
           ),
 
@@ -403,10 +409,7 @@ class _LandlordSettingsPageState
           Center(
             child: Text(
               'JUMAA • Version 1.0.0',
-              style: TextStyle(
-                color: Colors.grey.shade600,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
             ),
           ),
 

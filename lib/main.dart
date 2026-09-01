@@ -631,6 +631,7 @@ class _DashboardPageState extends State<DashboardPage> {
     SettingsPage(
       isDarkMode: widget.isDarkMode,
       onDarkModeChanged: widget.onDarkModeChanged,
+      showLogout: true,
     ),
   ];
 
@@ -7294,6 +7295,7 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
 
         state?._setDarkMode(enabled);
       },
+          showLogout: true,
     ),
   ];
 
@@ -7858,6 +7860,7 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
 
           state?._setDarkMode(enabled);
         },
+          showLogout: true,
       ),
     ];
 
@@ -9358,7 +9361,27 @@ class _LandlordLoginPageState extends State<LandlordLoginPage> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => LandlordDashboardPage(landlord: landlord),
+          builder: (_) => LandlordDashboardPage(
+            landlord: landlord,
+            isDarkMode: Theme.of(context).brightness == Brightness.dark,
+            onDarkModeChanged: (enabled) {
+              final state = context
+                  .findAncestorStateOfType<_ApartmentAppState>();
+
+              state?._setDarkMode(enabled);
+            },
+            onLogout: () async {
+              await OpenNestStore.supabase.auth.signOut();
+
+              if (!mounted) return;
+
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const JUMAAWelcomePage()),
+                (route) => false,
+              );
+            },
+          ),
         ),
       );
     } on AuthException catch (e) {
@@ -9593,7 +9616,26 @@ class _LandlordResetPasswordPageState extends State<LandlordResetPasswordPage> {
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(
-          builder: (_) => LandlordDashboardPage(landlord: widget.landlord),
+          builder: (_) => LandlordDashboardPage(
+            landlord: widget.landlord,
+            isDarkMode: Theme.of(context).brightness == Brightness.dark,
+            onDarkModeChanged: (enabled) {
+              final state = context
+                  .findAncestorStateOfType<_ApartmentAppState>();
+              state?._setDarkMode(enabled);
+            },
+            onLogout: () async {
+              await OpenNestStore.supabase.auth.signOut();
+
+              if (!mounted) return;
+
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const JUMAAWelcomePage()),
+                (route) => false,
+              );
+            },
+          ),
         ),
         (route) => false,
       );
@@ -10381,10 +10423,12 @@ class SettingsPage extends StatefulWidget {
     super.key,
     required this.isDarkMode,
     required this.onDarkModeChanged,
+    this.showLogout = false,
   });
 
   final bool isDarkMode;
   final ValueChanged<bool> onDarkModeChanged;
+  final bool showLogout;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -10560,24 +10604,25 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 20),
 
-          Card(
-            elevation: 0,
-            child: ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text(
-                'Log Out',
-                style: TextStyle(
-                  color: Colors.red,
-                  fontWeight: FontWeight.bold,
+          if (widget.showLogout) ...[
+            Card(
+              elevation: 0,
+              child: ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text(
+                  'Log Out',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
+                subtitle: const Text('Sign out of your JUMAA account'),
+                trailing: const Icon(Icons.chevron_right, color: Colors.red),
+                onTap: _logout,
               ),
-              subtitle: const Text('Sign out of your JUMAA account'),
-              trailing: const Icon(Icons.chevron_right, color: Colors.red),
-              onTap: _logout,
             ),
-          ),
-
-          const SizedBox(height: 30),
+            const SizedBox(height: 30),
+          ],
         ],
       ),
     );
@@ -14164,7 +14209,27 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => LandlordDashboardPage(landlord: landlord),
+            builder: (_) => LandlordDashboardPage(
+              landlord: landlord,
+              isDarkMode: Theme.of(context).brightness == Brightness.dark,
+              onDarkModeChanged: (enabled) {
+                final state = context
+                    .findAncestorStateOfType<_ApartmentAppState>();
+
+                state?._setDarkMode(enabled);
+              },
+              onLogout: () async {
+                await OpenNestStore.supabase.auth.signOut();
+
+                if (!mounted) return;
+
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const JUMAAWelcomePage()),
+                  (route) => false,
+                );
+              },
+            ),
           ),
         );
 
@@ -15202,7 +15267,6 @@ class ChatListScreen extends StatefulWidget {
 }
 
 class _ChatListScreenState extends State<ChatListScreen> {
-
   bool _loading = true;
   bool _creatingChat = false;
 
@@ -15472,14 +15536,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
   }
 
-  Future<String?> _getOrCreateConversation(
-    Map<String, dynamic> contact,
-  ) async {
+  Future<String?> _getOrCreateConversation(Map<String, dynamic> contact) async {
     final receiverId = contact['id']?.toString() ?? '';
 
-    if (_currentUserId.isEmpty ||
-        receiverId.isEmpty ||
-        _propertyId.isEmpty) {
+    if (_currentUserId.isEmpty || receiverId.isEmpty || _propertyId.isEmpty) {
       return null;
     }
 
@@ -15491,10 +15551,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     final response = await OpenNestStore.supabase.rpc(
       'get_or_create_apartment_conversation',
-      params: {
-        'p_property_id': _propertyId,
-        'p_receiver_id': receiverId,
-      },
+      params: {'p_property_id': _propertyId, 'p_receiver_id': receiverId},
     );
 
     final conversationId = response?.toString();
@@ -15503,9 +15560,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return null;
     }
 
-    debugPrint(
-      'CHAT: conversation ready = $conversationId',
-    );
+    debugPrint('CHAT: conversation ready = $conversationId');
 
     return conversationId;
   }
@@ -15626,22 +15681,22 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         ),
 
                         ..._contacts.map((contact) {
-                          final conversation = _conversations.cast<
-                              Map<String, dynamic>?>().firstWhere(
-                            (item) =>
-                                item?['contact']?['id']?.toString() ==
-                                contact['id']?.toString(),
-                            orElse: () => null,
-                          );
+                          final conversation = _conversations
+                              .cast<Map<String, dynamic>?>()
+                              .firstWhere(
+                                (item) =>
+                                    item?['contact']?['id']?.toString() ==
+                                    contact['id']?.toString(),
+                                orElse: () => null,
+                              );
 
-                          final latestMessage =
-                              conversation?['latest_message'];
+                          final latestMessage = conversation?['latest_message'];
 
                           final hasMessage = latestMessage != null;
 
                           final subtitle = hasMessage
                               ? latestMessage['message']?.toString() ??
-                                  'Message'
+                                    'Message'
                               : 'Tap to start chatting';
 
                           return Column(
@@ -15651,16 +15706,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                   horizontal: 18,
                                   vertical: 7,
                                 ),
-                                leading: _contactAvatar(
-                                  contact,
-                                  radius: 28,
-                                ),
+                                leading: _contactAvatar(contact, radius: 28),
                                 title: Row(
                                   children: [
                                     Expanded(
                                       child: Text(
-                                        contact['name']?.toString() ??
-                                            'Member',
+                                        contact['name']?.toString() ?? 'Member',
                                         style: const TextStyle(
                                           fontWeight: FontWeight.w700,
                                           fontSize: 16,
@@ -15704,11 +15755,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                         decoration: BoxDecoration(
                                           color: contact['type'] == 'landlord'
                                               ? const Color(0xFF075E54)
-                                                  .withValues(alpha: 0.10)
+                                                    .withValues(alpha: 0.10)
                                               : const Color(0xFF128C7E)
-                                                  .withValues(alpha: 0.10),
-                                          borderRadius:
-                                              BorderRadius.circular(12),
+                                                    .withValues(alpha: 0.10),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                         ),
                                         child: Text(
                                           contact['type'] == 'landlord'
@@ -15732,10 +15784,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                 ),
                                 onTap: () => _openContact(contact),
                               ),
-                              const Divider(
-                                height: 1,
-                                indent: 82,
-                              ),
+                              const Divider(height: 1, indent: 82),
                             ],
                           );
                         }),
@@ -15755,8 +15804,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           const SizedBox(height: 80),
           CircleAvatar(
             radius: 45,
-            backgroundColor:
-                const Color(0xFF075E54).withValues(alpha: 0.10),
+            backgroundColor: const Color(0xFF075E54).withValues(alpha: 0.10),
             child: const Icon(
               Icons.people_outline,
               size: 48,
@@ -15767,10 +15815,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           const Center(
             child: Text(
               'No apartment members yet',
-              style: TextStyle(
-                fontSize: 21,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
             ),
           ),
           const SizedBox(height: 8),
@@ -15778,10 +15823,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
             child: Text(
               'Your landlord and other tenants will appear here when they are available.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey.shade600,
-                fontSize: 14,
-              ),
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
             ),
           ),
         ],
