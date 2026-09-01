@@ -360,6 +360,8 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
   bool _loading = true;
   bool _loggedIn = false;
 
+  Map<String, dynamic>? _tenantProfile;
+
   @override
   void initState() {
     super.initState();
@@ -429,13 +431,23 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
       // VALIDATE TENANT SESSION
       // ----------------------------------------------------------
       if (role == 'tenant') {
+        debugPrint('AUTH GATE: Restoring tenant session...');
+
         final tenantProfile = await OpenNestStore.loadTenantProfile();
 
         if (tenantProfile != null && mounted) {
+          _tenantProfile = Map<String, dynamic>.from(tenantProfile);
+
+          debugPrint(
+            'AUTH GATE: Tenant session restored for '
+            '${_tenantProfile?['full_name'] ?? _tenantProfile?['email'] ?? 'Tenant'}',
+          );
+
           setState(() {
             _loggedIn = true;
             _loading = false;
           });
+
           return;
         }
 
@@ -527,6 +539,13 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
     }
 
     if (_loggedIn) {
+      // Restore tenants directly to the tenant dashboard.
+      // Supabase keeps the authentication session alive until
+      // the user explicitly signs out.
+      if (_tenantProfile != null) {
+        return TenantDashboardPage(tenantProfile: _tenantProfile!);
+      }
+
       return DashboardPage(
         isDarkMode: Theme.of(context).brightness == Brightness.dark,
         onDarkModeChanged: (enabled) {
@@ -7260,7 +7279,11 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
 
   List<Widget> get pages => [
     _buildDashboardPage(),
-    const ChatListScreen(),
+    ChatListScreen(
+      tenantProfile: widget.tenantProfile,
+      propertyId: widget.tenantProfile['property_id']?.toString(),
+      propertyName: property['name']?.toString(),
+    ),
     const TenantAnnouncementsPage(),
     TenantNotificationsPage(tenantProfile: widget.tenantProfile),
     PaymentsPage(tenantProfile: widget.tenantProfile),
@@ -7820,7 +7843,11 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
   Widget build(BuildContext context) {
     final pages = [
       _buildDashboardPage(),
-      const ChatListScreen(),
+      ChatListScreen(
+        tenantProfile: widget.tenantProfile,
+        propertyId: widget.tenantProfile['property_id']?.toString(),
+        propertyName: property['name']?.toString(),
+      ),
       const TenantAnnouncementsPage(),
       TenantNotificationsPage(tenantProfile: widget.tenantProfile),
       PaymentsPage(tenantProfile: widget.tenantProfile),
@@ -7960,8 +7987,8 @@ class _TenantNotificationsPageState extends State<TenantNotificationsPage> {
       final response = await OpenNestStore.supabase
           .from('notifications')
           .select(
-            'id, property_id, tenant_id, landlord_id, title, message, '
-            'notification_type, is_read, created_at',
+            'id, user_id, property_id, title, message, type, '
+            'is_read, created_at, sender_type, sender_name',
           )
           .eq('property_id', _propertyId)
           .order('created_at', ascending: false);
@@ -8065,12 +8092,17 @@ class _TenantNotificationsPageState extends State<TenantNotificationsPage> {
 
     try {
       await OpenNestStore.supabase.from('notifications').insert({
+        'user_id': OpenNestStore.supabase.auth.currentUser?.id,
         'property_id': _propertyId,
-        'tenant_id': _tenantId,
         'title': titleController.text.trim(),
         'message': messageController.text.trim(),
-        'notification_type': 'general',
+        'type': 'general',
         'is_read': false,
+        'sender_type': 'tenant',
+        'sender_name':
+            widget.tenantProfile['full_name']?.toString() ??
+            widget.tenantProfile['name']?.toString() ??
+            'Tenant',
       });
 
       titleController.dispose();
@@ -8229,7 +8261,8 @@ class _TenantNotificationsPageState extends State<TenantNotificationsPage> {
                       final createdAt = notification['created_at'];
 
                       final isMine =
-                          notification['tenant_id']?.toString() == _tenantId;
+                          notification['user_id']?.toString() ==
+                          OpenNestStore.supabase.auth.currentUser?.id;
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -13999,9 +14032,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
   Future<void> _forgotPassword() async {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => const JUMAAForgotPasswordPage(),
-      ),
+      MaterialPageRoute(builder: (_) => const JUMAAForgotPasswordPage()),
     );
   }
 
@@ -14199,9 +14230,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
 
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(
-            builder: (_) => const JumaaOwnerDashboard(),
-          ),
+          MaterialPageRoute(builder: (_) => const JumaaOwnerDashboard()),
         );
 
         return;
@@ -14445,15 +14474,11 @@ class JUMAAPasswordResetService {
   static const String _functionUrl =
       'https://pdezijwjfqyulkkuhoun.supabase.co/functions/v1/reset-jumaa-owner-password';
 
-  static Future<Map<String, dynamic>> _call(
-    Map<String, dynamic> body,
-  ) async {
+  static Future<Map<String, dynamic>> _call(Map<String, dynamic> body) async {
     try {
       final response = await http.post(
         Uri.parse(_functionUrl),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode(body),
       );
 
@@ -14478,8 +14503,7 @@ class JUMAAPasswordResetService {
 
       return {
         'success': false,
-        'error': data['error']?.toString() ??
-            'Password reset request failed.',
+        'error': data['error']?.toString() ?? 'Password reset request failed.',
       };
     } catch (e) {
       debugPrint('PASSWORD RESET ERROR: $e');
@@ -14491,9 +14515,7 @@ class JUMAAPasswordResetService {
     }
   }
 
-  static Future<Map<String, dynamic>> requestCode({
-    required String email,
-  }) {
+  static Future<Map<String, dynamic>> requestCode({required String email}) {
     return _call({
       'action': 'request_code',
       'email': email.trim().toLowerCase(),
@@ -14535,8 +14557,7 @@ class JUMAAForgotPasswordPage extends StatefulWidget {
       _JUMAAForgotPasswordPageState();
 }
 
-class _JUMAAForgotPasswordPageState
-    extends State<JUMAAForgotPasswordPage> {
+class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
   final _emailController = TextEditingController();
 
   bool _loading = false;
@@ -14552,9 +14573,7 @@ class _JUMAAForgotPasswordPageState
 
     if (email.isEmpty || !email.contains('@')) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter a valid email address.'),
-        ),
+        const SnackBar(content: Text('Enter a valid email address.')),
       );
       return;
     }
@@ -14563,9 +14582,7 @@ class _JUMAAForgotPasswordPageState
       _loading = true;
     });
 
-    final result = await JUMAAPasswordResetService.requestCode(
-      email: email,
-    );
+    final result = await JUMAAPasswordResetService.requestCode(email: email);
 
     if (!mounted) return;
 
@@ -14588,9 +14605,7 @@ class _JUMAAForgotPasswordPageState
 
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => JUMAAVerifyCodePage(email: email),
-      ),
+      MaterialPageRoute(builder: (_) => JUMAAVerifyCodePage(email: email)),
     );
   }
 
@@ -14631,10 +14646,7 @@ class _JUMAAForgotPasswordPageState
           const Text(
             'Enter your JUMAA email address and we will send you a verification code.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.black54,
-              height: 1.4,
-            ),
+            style: TextStyle(color: Colors.black54, height: 1.4),
           ),
 
           const SizedBox(height: 30),
@@ -14643,10 +14655,7 @@ class _JUMAAForgotPasswordPageState
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
-            style: const TextStyle(
-              color: Colors.black,
-              fontSize: 16,
-            ),
+            style: const TextStyle(color: Colors.black, fontSize: 16),
             decoration: InputDecoration(
               labelText: 'Email address',
               prefixIcon: const Icon(Icons.email_outlined),
@@ -14683,9 +14692,7 @@ class _JUMAAForgotPasswordPageState
                     )
                   : const Text(
                       'SEND VERIFICATION CODE',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
             ),
           ),
@@ -14695,11 +14702,7 @@ class _JUMAAForgotPasswordPageState
           const Text(
             'If an account exists for this email, a verification code will be sent.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.black45,
-              fontSize: 12,
-              height: 1.4,
-            ),
+            style: TextStyle(color: Colors.black45, fontSize: 12, height: 1.4),
           ),
         ],
       ),
@@ -14712,20 +14715,15 @@ class _JUMAAForgotPasswordPageState
 // ============================================================
 
 class JUMAAVerifyCodePage extends StatefulWidget {
-  const JUMAAVerifyCodePage({
-    super.key,
-    required this.email,
-  });
+  const JUMAAVerifyCodePage({super.key, required this.email});
 
   final String email;
 
   @override
-  State<JUMAAVerifyCodePage> createState() =>
-      _JUMAAVerifyCodePageState();
+  State<JUMAAVerifyCodePage> createState() => _JUMAAVerifyCodePageState();
 }
 
-class _JUMAAVerifyCodePageState
-    extends State<JUMAAVerifyCodePage> {
+class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
   final _codeController = TextEditingController();
 
   bool _verifying = false;
@@ -14768,8 +14766,7 @@ class _JUMAAVerifyCodePageState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            result['error']?.toString() ??
-                'Invalid verification code.',
+            result['error']?.toString() ?? 'Invalid verification code.',
           ),
           behavior: SnackBarBehavior.floating,
         ),
@@ -14839,10 +14836,7 @@ class _JUMAAVerifyCodePageState
           Text(
             'Enter the 5-digit verification code sent to ${widget.email}.',
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.black54,
-              height: 1.4,
-            ),
+            style: const TextStyle(color: Colors.black54, height: 1.4),
           ),
 
           const SizedBox(height: 30),
@@ -14864,18 +14858,13 @@ class _JUMAAVerifyCodePageState
                 Text(
                   'A verification code has been sent to your email.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Color(0xFF285548),
-                  ),
+                  style: TextStyle(color: Color(0xFF285548)),
                 ),
                 SizedBox(height: 6),
                 Text(
                   'The code expires in 10 minutes.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.black54,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: Colors.black54, fontSize: 12),
                 ),
               ],
             ),
@@ -14933,9 +14922,7 @@ class _JUMAAVerifyCodePageState
                     )
                   : const Text(
                       'VERIFY CODE',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
             ),
           ),
@@ -14987,9 +14974,7 @@ class _JUMAACreateNewPasswordPageState
     if (password.length < 8) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Password must be at least 8 characters.',
-          ),
+          content: Text('Password must be at least 8 characters.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -15010,8 +14995,7 @@ class _JUMAACreateNewPasswordPageState
       _saving = true;
     });
 
-    final result =
-        await JUMAAPasswordResetService.resetPassword(
+    final result = await JUMAAPasswordResetService.resetPassword(
       resetToken: widget.resetToken,
       newPassword: password,
     );
@@ -15026,8 +15010,7 @@ class _JUMAACreateNewPasswordPageState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            result['error']?.toString() ??
-                'Could not reset your password.',
+            result['error']?.toString() ?? 'Could not reset your password.',
           ),
           behavior: SnackBarBehavior.floating,
         ),
@@ -15044,17 +15027,13 @@ class _JUMAACreateNewPasswordPageState
       ),
     );
 
-    await Future.delayed(
-      const Duration(milliseconds: 900),
-    );
+    await Future.delayed(const Duration(milliseconds: 900));
 
     if (!mounted) return;
 
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(
-        builder: (_) => const JUMAALoginPage(),
-      ),
+      MaterialPageRoute(builder: (_) => const JUMAALoginPage()),
       (route) => false,
     );
   }
@@ -15096,9 +15075,7 @@ class _JUMAACreateNewPasswordPageState
           const Text(
             'Choose a strong password for your JUMAA account.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.black54,
-            ),
+            style: TextStyle(color: Colors.black54),
           ),
 
           const SizedBox(height: 30),
@@ -15106,10 +15083,7 @@ class _JUMAACreateNewPasswordPageState
           TextField(
             controller: _passwordController,
             obscureText: _obscurePassword,
-            style: const TextStyle(
-              color: Colors.black,
-              fontSize: 16,
-            ),
+            style: const TextStyle(color: Colors.black, fontSize: 16),
             cursorColor: const Color(0xFF0B3D2E),
             decoration: InputDecoration(
               labelText: 'New password',
@@ -15117,8 +15091,7 @@ class _JUMAACreateNewPasswordPageState
               suffixIcon: IconButton(
                 onPressed: () {
                   setState(() {
-                    _obscurePassword =
-                        !_obscurePassword;
+                    _obscurePassword = !_obscurePassword;
                   });
                 },
                 icon: Icon(
@@ -15141,20 +15114,14 @@ class _JUMAACreateNewPasswordPageState
           TextField(
             controller: _confirmController,
             obscureText: _obscureConfirm,
-            style: const TextStyle(
-              color: Colors.black,
-              fontSize: 16,
-            ),
+            style: const TextStyle(color: Colors.black, fontSize: 16),
             decoration: InputDecoration(
               labelText: 'Confirm new password',
-              prefixIcon: const Icon(
-                Icons.lock_reset_outlined,
-              ),
+              prefixIcon: const Icon(Icons.lock_reset_outlined),
               suffixIcon: IconButton(
                 onPressed: () {
                   setState(() {
-                    _obscureConfirm =
-                        !_obscureConfirm;
+                    _obscureConfirm = !_obscureConfirm;
                   });
                 },
                 icon: Icon(
@@ -15177,10 +15144,7 @@ class _JUMAACreateNewPasswordPageState
           const Text(
             'Use at least 8 characters. Do not reuse an old password.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.black45,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: Colors.black45, fontSize: 12),
           ),
 
           const SizedBox(height: 25),
@@ -15188,8 +15152,7 @@ class _JUMAACreateNewPasswordPageState
           SizedBox(
             height: 55,
             child: ElevatedButton(
-              onPressed:
-                  _saving ? null : _resetPassword,
+              onPressed: _saving ? null : _resetPassword,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF0B3D2E),
                 foregroundColor: Colors.white,
@@ -15208,9 +15171,7 @@ class _JUMAACreateNewPasswordPageState
                     )
                   : const Text(
                       'RESET PASSWORD',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
             ),
           ),
@@ -15221,6 +15182,7 @@ class _JUMAACreateNewPasswordPageState
 }
 
 class ChatListScreen extends StatefulWidget {
+  final Map<String, dynamic>? tenantProfile;
   final String? landlordId;
   final String? landlordName;
   final String? propertyId;
@@ -15228,6 +15190,7 @@ class ChatListScreen extends StatefulWidget {
 
   const ChatListScreen({
     super.key,
+    this.tenantProfile,
     this.landlordId,
     this.landlordName,
     this.propertyId,
@@ -15239,10 +15202,634 @@ class ChatListScreen extends StatefulWidget {
 }
 
 class _ChatListScreenState extends State<ChatListScreen> {
+
+  bool _loading = true;
+  bool _creatingChat = false;
+
+  final List<Map<String, dynamic>> _contacts = [];
+  final List<Map<String, dynamic>> _conversations = [];
+
+  String get _currentUserId =>
+      widget.tenantProfile?['auth_user_id']?.toString() ??
+      widget.tenantProfile?['user_id']?.toString() ??
+      '';
+
+  String get _propertyId =>
+      widget.propertyId ??
+      widget.tenantProfile?['property_id']?.toString() ??
+      '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMessagingData();
+  }
+
+  Future<void> _loadMessagingData() async {
+    if (_propertyId.isEmpty || _currentUserId.isEmpty) {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+      return;
+    }
+
+    try {
+      _contacts.clear();
+      _conversations.clear();
+
+      /*
+       * Load every tenant belonging to the same property.
+       *
+       * The current tenant is excluded from the contact list.
+       */
+      final tenantResponse = await OpenNestStore.supabase
+          .from('tenants')
+          .select(
+            'id, auth_user_id, full_name, email, phone, '
+            'property_id, unit_id, account_status',
+          )
+          .eq('property_id', _propertyId)
+          .eq('account_status', 'active');
+
+      for (final row in tenantResponse) {
+        final tenant = Map<String, dynamic>.from(row);
+
+        final authId = tenant['auth_user_id']?.toString() ?? '';
+
+        if (authId.isEmpty || authId == _currentUserId) {
+          continue;
+        }
+
+        _contacts.add({
+          'id': authId,
+          'profile_id': authId,
+          'name': tenant['full_name']?.toString() ?? 'Tenant',
+          'email': tenant['email']?.toString() ?? '',
+          'type': 'tenant',
+          'unit_id': tenant['unit_id']?.toString() ?? '',
+          'tenant_id': tenant['id']?.toString() ?? '',
+        });
+      }
+
+      /*
+       * Load the landlord assigned to this property.
+       *
+       * Relationship:
+       * tenant.property_id
+       *       -> properties.landlord_id
+       *       -> landlords.id
+       *       -> landlords.auth_user_id
+       *
+       * The messaging profile_id MUST be the Supabase Auth UUID.
+       */
+      debugPrint('MESSAGING: current tenant auth ID = $_currentUserId');
+      debugPrint('MESSAGING: current property ID = $_propertyId');
+
+      final propertyResponse = await OpenNestStore.supabase
+          .from('properties')
+          .select('id, name, landlord_id')
+          .eq('id', _propertyId)
+          .maybeSingle();
+
+      debugPrint('MESSAGING: property response = $propertyResponse');
+
+      if (propertyResponse != null) {
+        final landlordDatabaseId =
+            propertyResponse['landlord_id']?.toString() ?? '';
+
+        debugPrint('MESSAGING: property landlord_id = $landlordDatabaseId');
+
+        if (landlordDatabaseId.isNotEmpty) {
+          final landlordResponse = await OpenNestStore.supabase
+              .from('landlords')
+              .select('id, auth_user_id, full_name, email, phone')
+              .eq('auth_user_id', landlordDatabaseId)
+              .maybeSingle();
+
+          debugPrint('MESSAGING: landlord response = $landlordResponse');
+
+          if (landlordResponse != null) {
+            final landlord = Map<String, dynamic>.from(landlordResponse);
+
+            final landlordAuthId = landlord['auth_user_id']?.toString() ?? '';
+
+            debugPrint('MESSAGING: landlord auth_user_id = $landlordAuthId');
+
+            if (landlordAuthId.isNotEmpty && landlordAuthId != _currentUserId) {
+              _contacts.insert(0, {
+                'id': landlordAuthId,
+                'profile_id': landlordAuthId,
+                'name': landlord['full_name']?.toString() ?? 'Landlord',
+                'email': landlord['email']?.toString() ?? '',
+                'type': 'landlord',
+                'unit_id': '',
+                'tenant_id': '',
+              });
+
+              debugPrint(
+                'MESSAGING: LANDLORD CONTACT ADDED: '
+                '${landlord['full_name']} ($landlordAuthId)',
+              );
+            } else {
+              debugPrint(
+                'MESSAGING: landlord auth_user_id is empty '
+                'or matches current tenant.',
+              );
+            }
+          } else {
+            debugPrint(
+              'MESSAGING: NO LANDLORD FOUND for ID '
+              '$landlordDatabaseId',
+            );
+          }
+        } else {
+          debugPrint('MESSAGING: PROPERTY HAS NO landlord_id');
+        }
+      } else {
+        debugPrint('MESSAGING: PROPERTY NOT FOUND for $_propertyId');
+      }
+
+      await _loadExistingConversations();
+
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('TENANT MESSAGES LOAD ERROR: $e');
+
+      if (!mounted) return;
+
+      setState(() => _loading = false);
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not load messages: $e')));
+    }
+  }
+
+  Future<void> _loadExistingConversations() async {
+    if (_currentUserId.isEmpty || _propertyId.isEmpty) {
+      return;
+    }
+
+    try {
+      final participantRows = await OpenNestStore.supabase
+          .from('conversation_participants')
+          .select('conversation_id, profile_id, joined_at')
+          .eq('profile_id', _currentUserId);
+
+      if (participantRows.isEmpty) {
+        return;
+      }
+
+      final conversationIds = participantRows
+          .map((row) => row['conversation_id']?.toString())
+          .whereType<String>()
+          .toSet()
+          .toList();
+
+      for (final conversationId in conversationIds) {
+        final conversation = await OpenNestStore.supabase
+            .from('conversations')
+            .select('id, property_id, unit_id, created_at')
+            .eq('id', conversationId)
+            .eq('property_id', _propertyId)
+            .maybeSingle();
+
+        if (conversation == null) {
+          continue;
+        }
+
+        final participants = await OpenNestStore.supabase
+            .from('conversation_participants')
+            .select('profile_id')
+            .eq('conversation_id', conversationId);
+
+        final otherIds = participants
+            .map((row) => row['profile_id']?.toString())
+            .whereType<String>()
+            .where((id) => id != _currentUserId)
+            .toList();
+
+        if (otherIds.isEmpty) {
+          continue;
+        }
+
+        final otherId = otherIds.first;
+
+        final contact = _contacts.cast<Map<String, dynamic>?>().firstWhere(
+          (item) => item?['id']?.toString() == otherId,
+          orElse: () => null,
+        );
+
+        /*
+         * Only display conversations with permitted contacts.
+         * This automatically prevents tenant access to JUMAA owner/admin
+         * accounts because they are never added to _contacts.
+         */
+        if (contact == null) {
+          continue;
+        }
+
+        final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
+
+        final latestMessage = await OpenNestStore.supabase
+            .from('messages')
+            .select('id, sender_id, receiver_id, message, status, created_at')
+            .eq('conversation_id', conversationId)
+            .gte('created_at', cutoff.toIso8601String())
+            .order('created_at', ascending: false)
+            .limit(1)
+            .maybeSingle();
+
+        _conversations.add({
+          'conversation_id': conversationId,
+          'contact': contact,
+          'latest_message': latestMessage,
+          'created_at': conversation['created_at'],
+        });
+      }
+
+      _conversations.sort((a, b) {
+        final aMessage = a['latest_message'];
+        final bMessage = b['latest_message'];
+
+        final aDate =
+            DateTime.tryParse(aMessage?['created_at']?.toString() ?? '') ??
+            DateTime.tryParse(a['created_at']?.toString() ?? '') ??
+            DateTime(1970);
+
+        final bDate =
+            DateTime.tryParse(bMessage?['created_at']?.toString() ?? '') ??
+            DateTime.tryParse(b['created_at']?.toString() ?? '') ??
+            DateTime(1970);
+
+        return bDate.compareTo(aDate);
+      });
+    } catch (e) {
+      debugPrint('TENANT CONVERSATIONS LOAD ERROR: $e');
+    }
+  }
+
+  Future<String?> _getOrCreateConversation(
+    Map<String, dynamic> contact,
+  ) async {
+    final receiverId = contact['id']?.toString() ?? '';
+
+    if (_currentUserId.isEmpty ||
+        receiverId.isEmpty ||
+        _propertyId.isEmpty) {
+      return null;
+    }
+
+    debugPrint('===== CHAT RPC =====');
+    debugPrint('Current user: $_currentUserId');
+    debugPrint('Property: $_propertyId');
+    debugPrint('Receiver: $receiverId');
+    debugPrint('===================');
+
+    final response = await OpenNestStore.supabase.rpc(
+      'get_or_create_apartment_conversation',
+      params: {
+        'p_property_id': _propertyId,
+        'p_receiver_id': receiverId,
+      },
+    );
+
+    final conversationId = response?.toString();
+
+    if (conversationId == null || conversationId.isEmpty) {
+      return null;
+    }
+
+    debugPrint(
+      'CHAT: conversation ready = $conversationId',
+    );
+
+    return conversationId;
+  }
+
+  Future<void> _openContact(Map<String, dynamic> contact) async {
+    if (_creatingChat) return;
+
+    setState(() {
+      _creatingChat = true;
+    });
+
+    try {
+      final conversationId = await _getOrCreateConversation(contact);
+
+      if (!mounted) return;
+
+      if (conversationId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not create this conversation.')),
+        );
+        return;
+      }
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TenantChatConversationScreen(
+            conversationId: conversationId,
+            currentUserId: _currentUserId,
+            contact: contact,
+            propertyId: _propertyId,
+          ),
+        ),
+      );
+
+      await _loadMessagingData();
+    } catch (e) {
+      debugPrint('TENANT OPEN CHAT ERROR: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not open chat: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _creatingChat = false;
+        });
+      }
+    }
+  }
+
+  Widget _contactAvatar(Map<String, dynamic> contact, {double radius = 25}) {
+    final isLandlord = contact['type'] == 'landlord';
+
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: isLandlord
+          ? const Color(0xFF075E54)
+          : const Color(0xFF128C7E),
+      child: Icon(
+        isLandlord ? Icons.home_work_outlined : Icons.person_outline,
+        color: Colors.white,
+        size: radius,
+      ),
+    );
+  }
+
+  String _formatTime(dynamic value) {
+    final date = DateTime.tryParse(value?.toString() ?? '');
+
+    if (date == null) return '';
+
+    final local = date.toLocal();
+
+    return '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: const Color(0xFF075E54),
+        foregroundColor: Colors.white,
+        title: const Text(
+          'Messages',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadMessagingData,
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadMessagingData,
+              child: _contacts.isEmpty
+                  ? _buildEmptyMessages()
+                  : ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: 20),
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(18, 20, 18, 10),
+                          child: Text(
+                            'Apartment members',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+
+                        ..._contacts.map((contact) {
+                          final conversation = _conversations.cast<
+                              Map<String, dynamic>?>().firstWhere(
+                            (item) =>
+                                item?['contact']?['id']?.toString() ==
+                                contact['id']?.toString(),
+                            orElse: () => null,
+                          );
+
+                          final latestMessage =
+                              conversation?['latest_message'];
+
+                          final hasMessage = latestMessage != null;
+
+                          final subtitle = hasMessage
+                              ? latestMessage['message']?.toString() ??
+                                  'Message'
+                              : 'Tap to start chatting';
+
+                          return Column(
+                            children: [
+                              ListTile(
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 7,
+                                ),
+                                leading: _contactAvatar(
+                                  contact,
+                                  radius: 28,
+                                ),
+                                title: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        contact['name']?.toString() ??
+                                            'Member',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                    ),
+                                    if (hasMessage)
+                                      Text(
+                                        _formatTime(
+                                          latestMessage['created_at'],
+                                        ),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey.shade600,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                subtitle: Padding(
+                                  padding: const EdgeInsets.only(top: 5),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          subtitle,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: hasMessage
+                                                ? Colors.grey.shade700
+                                                : Colors.grey.shade500,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 3,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: contact['type'] == 'landlord'
+                                              ? const Color(0xFF075E54)
+                                                  .withValues(alpha: 0.10)
+                                              : const Color(0xFF128C7E)
+                                                  .withValues(alpha: 0.10),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          contact['type'] == 'landlord'
+                                              ? 'Landlord'
+                                              : 'Tenant',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: contact['type'] == 'landlord'
+                                                ? const Color(0xFF075E54)
+                                                : const Color(0xFF128C7E),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                trailing: const Icon(
+                                  Icons.chevron_right,
+                                  color: Colors.grey,
+                                ),
+                                onTap: () => _openContact(contact),
+                              ),
+                              const Divider(
+                                height: 1,
+                                indent: 82,
+                              ),
+                            ],
+                          );
+                        }),
+                      ],
+                    ),
+            ),
+    );
+  }
+
+  Widget _buildEmptyMessages() {
+    return RefreshIndicator(
+      onRefresh: _loadMessagingData,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(28),
+        children: [
+          const SizedBox(height: 80),
+          CircleAvatar(
+            radius: 45,
+            backgroundColor:
+                const Color(0xFF075E54).withValues(alpha: 0.10),
+            child: const Icon(
+              Icons.people_outline,
+              size: 48,
+              color: Color(0xFF075E54),
+            ),
+          ),
+          const SizedBox(height: 22),
+          const Center(
+            child: Text(
+              'No apartment members yet',
+              style: TextStyle(
+                fontSize: 21,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              'Your landlord and other tenants will appear here when they are available.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class TenantChatConversationScreen extends StatefulWidget {
+  final String conversationId;
+  final String currentUserId;
+  final Map<String, dynamic> contact;
+  final String propertyId;
+
+  const TenantChatConversationScreen({
+    super.key,
+    required this.conversationId,
+    required this.currentUserId,
+    required this.contact,
+    required this.propertyId,
+  });
+
+  @override
+  State<TenantChatConversationScreen> createState() =>
+      _TenantChatConversationScreenState();
+}
+
+class _TenantChatConversationScreenState
+    extends State<TenantChatConversationScreen> {
   final TextEditingController _messageController = TextEditingController();
+
   final ScrollController _scrollController = ScrollController();
 
-  final List<Map<String, dynamic>> _messages = [];
+  List<Map<String, dynamic>> _messages = [];
+  bool _loading = true;
+  bool _sending = false;
+
+  String get _receiverId => widget.contact['id']?.toString() ?? '';
+
+  String get _contactName => widget.contact['name']?.toString() ?? 'Member';
+
+  bool get _isLandlord => widget.contact['type'] == 'landlord';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMessages();
+  }
 
   @override
   void dispose() {
@@ -15251,167 +15838,131 @@ class _ChatListScreenState extends State<ChatListScreen> {
     super.dispose();
   }
 
-  void _sendMessage() {
+  Future<void> _loadMessages() async {
+    try {
+      final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
+
+      final response = await OpenNestStore.supabase
+          .from('messages')
+          .select(
+            'id, sender_id, receiver_id, conversation_id, '
+            'message, status, created_at, delivered_at, read_at',
+          )
+          .eq('conversation_id', widget.conversationId)
+          .gte('created_at', cutoff.toIso8601String())
+          .order('created_at', ascending: true);
+
+      if (!mounted) return;
+
+      setState(() {
+        _messages = List<Map<String, dynamic>>.from(response);
+        _loading = false;
+      });
+
+      _scrollToBottom();
+    } catch (e) {
+      debugPrint('TENANT CHAT LOAD ERROR: $e');
+
+      if (!mounted) return;
+
+      setState(() => _loading = false);
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not load messages: $e')));
+    }
+  }
+
+  Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
 
-    if (text.isEmpty) {
+    if (text.isEmpty || _sending || _receiverId.isEmpty) {
       return;
     }
 
     setState(() {
-      _messages.add({'text': text, 'isMe': true, 'time': DateTime.now()});
+      _sending = true;
     });
 
-    _messageController.clear();
+    try {
+      await OpenNestStore.supabase.from('messages').insert({
+        'sender_id': widget.currentUserId,
+        'receiver_id': _receiverId,
+        'conversation_id': widget.conversationId,
+        'message': text,
+        'status': 'sent',
+      });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+      _messageController.clear();
+
+      await _loadMessages();
+    } catch (e) {
+      debugPrint('TENANT CHAT SEND ERROR: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not send message: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _sending = false;
+        });
       }
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) {
+        return;
+      }
+
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFEFE7DE),
+  String _formatTime(dynamic value) {
+    final date = DateTime.tryParse(value?.toString() ?? '');
 
-      appBar: AppBar(
-        toolbarHeight: 54,
-        elevation: 0,
-        backgroundColor: const Color(0xFF075E54),
-        foregroundColor: Colors.white,
+    if (date == null) return '';
 
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, size: 20),
-          padding: EdgeInsets.zero,
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+    final local = date.toLocal();
 
-        titleSpacing: 0,
-
-        title: const Row(
-          children: [
-            CircleAvatar(
-              radius: 15,
-              backgroundColor: Color(0xFF128C7E),
-              child: Icon(
-                Icons.admin_panel_settings_outlined,
-                color: Colors.white,
-                size: 17,
-              ),
-            ),
-            SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Admin',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                ),
-                Text(
-                  'online',
-                  style: TextStyle(fontSize: 10, color: Colors.white70),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: _messages.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
-                      itemCount: _messages.length,
-                      itemBuilder: (context, index) {
-                        final message = _messages[index];
-
-                        return _buildMessage(
-                          message['text'] as String,
-                          message['isMe'] as bool,
-                          message['time'] as DateTime,
-                        );
-                      },
-                    ),
-            ),
-
-            _buildMessageInput(),
-          ],
-        ),
-      ),
-    );
+    return '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
   }
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(30),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: Colors.blue.withValues(alpha: 0.10),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.chat_bubble_outline,
-                size: 40,
-                color: Color(0xFF1976D2),
-              ),
-            ),
+  Widget _buildBubble(Map<String, dynamic> message) {
+    final sender = message['sender_id']?.toString() ?? '';
 
-            const SizedBox(height: 20),
+    final isMine = sender == widget.currentUserId;
 
-            const Text(
-              'Start a conversation',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-            ),
-
-            const SizedBox(height: 8),
-
-            const Text(
-              'Send a message to get started.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey, fontSize: 14),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMessage(String text, bool isMe, DateTime time) {
-    final timeString =
-        '${time.hour.toString().padLeft(2, '0')}:'
-        '${time.minute.toString().padLeft(2, '0')}';
+    final text = message['message']?.toString() ?? '';
 
     return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 245),
-        margin: const EdgeInsets.only(bottom: 4, left: 4, right: 4),
-        padding: const EdgeInsets.fromLTRB(9, 6, 7, 5),
+        constraints: const BoxConstraints(maxWidth: 290),
+        margin: const EdgeInsets.only(left: 8, right: 8, bottom: 5),
+        padding: const EdgeInsets.fromLTRB(10, 7, 8, 6),
         decoration: BoxDecoration(
-          color: isMe ? const Color(0xFFD9FDD3) : Colors.white,
+          color: isMine ? const Color(0xFFD9FDD3) : Colors.white,
           borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(9),
-            topRight: const Radius.circular(9),
-            bottomLeft: Radius.circular(isMe ? 9 : 2),
-            bottomRight: Radius.circular(isMe ? 2 : 9),
+            topLeft: const Radius.circular(10),
+            topRight: const Radius.circular(10),
+            bottomLeft: Radius.circular(isMine ? 10 : 2),
+            bottomRight: Radius.circular(isMine ? 2 : 10),
           ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 2,
+            ),
+          ],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -15420,24 +15971,23 @@ class _ChatListScreenState extends State<ChatListScreen> {
             Flexible(
               child: Text(
                 text,
-                style: TextStyle(
-                  color: Colors.black87,
-                  fontSize: 12,
-                  height: 1.25,
-                ),
+                style: const TextStyle(fontSize: 14, height: 1.3),
               ),
             ),
-
-            const SizedBox(width: 6),
-
+            const SizedBox(width: 7),
             Text(
-              timeString,
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 8),
+              _formatTime(message['created_at']),
+              style: TextStyle(fontSize: 9, color: Colors.grey.shade600),
             ),
-
-            if (isMe) ...[
-              const SizedBox(width: 2),
-              const Icon(Icons.done_all, size: 11, color: Color(0xFF53BDEB)),
+            if (isMine) ...[
+              const SizedBox(width: 3),
+              Icon(
+                message['status'] == 'read' ? Icons.done_all : Icons.done,
+                size: 13,
+                color: message['status'] == 'read'
+                    ? const Color(0xFF53BDEB)
+                    : Colors.grey,
+              ),
             ],
           ],
         ),
@@ -15445,9 +15995,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  Widget _buildMessageInput() {
+  Widget _buildInput() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+      padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -15471,47 +16021,133 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 hintText: 'Type a message...',
                 filled: true,
                 fillColor: const Color(0xFFF2F3F5),
-
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 16,
-                  vertical: 12,
+                  vertical: 11,
                 ),
-
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
                   borderSide: BorderSide.none,
                 ),
-
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
                   borderSide: BorderSide.none,
                 ),
-
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
-                  borderSide: const BorderSide(color: Color(0xFF1976D2)),
+                  borderSide: const BorderSide(color: Color(0xFF075E54)),
                 ),
               ),
-
               onSubmitted: (_) => _sendMessage(),
             ),
           ),
-
-          const SizedBox(width: 8),
-
+          const SizedBox(width: 7),
           Material(
-            color: const Color(0xFF1976D2),
+            color: const Color(0xFF075E54),
             shape: const CircleBorder(),
             child: InkWell(
               customBorder: const CircleBorder(),
-              onTap: _sendMessage,
-              child: const Padding(
-                padding: EdgeInsets.all(13),
-                child: Icon(Icons.send, color: Colors.white, size: 22),
+              onTap: _sending ? null : _sendMessage,
+              child: Padding(
+                padding: const EdgeInsets.all(13),
+                child: _sending
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Icon(Icons.send, color: Colors.white, size: 21),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFEFE7DE),
+      appBar: AppBar(
+        toolbarHeight: 58,
+        elevation: 0,
+        backgroundColor: const Color(0xFF075E54),
+        foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: const Color(0xFF128C7E),
+              child: Icon(
+                _isLandlord ? Icons.home_work_outlined : Icons.person_outline,
+                color: Colors.white,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 9),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _contactName,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  _isLandlord ? 'Landlord' : 'Tenant',
+                  style: const TextStyle(fontSize: 11, color: Colors.white70),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : RefreshIndicator(
+                      onRefresh: _loadMessages,
+                      child: _messages.isEmpty
+                          ? ListView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              children: const [
+                                SizedBox(height: 230),
+                                Center(
+                                  child: Text(
+                                    'No messages yet',
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                ),
+                              ],
+                            )
+                          : ListView.builder(
+                              controller: _scrollController,
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.only(top: 8, bottom: 8),
+                              itemCount: _messages.length,
+                              itemBuilder: (context, index) {
+                                return _buildBubble(_messages[index]);
+                              },
+                            ),
+                    ),
+            ),
+            _buildInput(),
+          ],
+        ),
       ),
     );
   }
