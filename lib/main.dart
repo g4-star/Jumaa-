@@ -13997,56 +13997,12 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
   bool _isLoggingIn = false;
 
   Future<void> _forgotPassword() async {
-    final email = _emailController.text.trim().toLowerCase();
-
-    if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter your email first.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
-    try {
-      await OpenNestStore.supabase.auth.resetPasswordForEmail(email);
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Password reset instructions have been sent to your email.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } on AuthException catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            e.message.isNotEmpty
-                ? e.message
-                : 'Could not send password reset instructions.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not send password reset instructions.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
-      debugPrint('JUMAA FORGOT PASSWORD ERROR: $e');
-    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const JUMAAForgotPasswordPage(),
+      ),
+    );
   }
 
   @override
@@ -14482,6 +14438,92 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
 }
 
 // ============================================================
+// JUMAA - SECURE PASSWORD RESET
+// ============================================================
+
+class JUMAAPasswordResetService {
+  static const String _functionUrl =
+      'https://pdezijwjfqyulkkuhoun.supabase.co/functions/v1/reset-jumaa-owner-password';
+
+  static Future<Map<String, dynamic>> _call(
+    Map<String, dynamic> body,
+  ) async {
+    try {
+      final response = await http.post(
+        Uri.parse(_functionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(body),
+      );
+
+      debugPrint(
+        'PASSWORD RESET: status=${response.statusCode} body=${response.body}',
+      );
+
+      Map<String, dynamic> data;
+
+      try {
+        data = jsonDecode(response.body) as Map<String, dynamic>;
+      } catch (_) {
+        return {
+          'success': false,
+          'error': 'Invalid response from password reset service.',
+        };
+      }
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return data;
+      }
+
+      return {
+        'success': false,
+        'error': data['error']?.toString() ??
+            'Password reset request failed.',
+      };
+    } catch (e) {
+      debugPrint('PASSWORD RESET ERROR: $e');
+
+      return {
+        'success': false,
+        'error': 'Unable to connect to the password reset service.',
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> requestCode({
+    required String email,
+  }) {
+    return _call({
+      'action': 'request_code',
+      'email': email.trim().toLowerCase(),
+    });
+  }
+
+  static Future<Map<String, dynamic>> verifyCode({
+    required String email,
+    required String code,
+  }) {
+    return _call({
+      'action': 'verify_code',
+      'email': email.trim().toLowerCase(),
+      'code': code.trim(),
+    });
+  }
+
+  static Future<Map<String, dynamic>> resetPassword({
+    required String resetToken,
+    required String newPassword,
+  }) {
+    return _call({
+      'action': 'reset_password',
+      'reset_token': resetToken,
+      'new_password': newPassword,
+    });
+  }
+}
+
+// ============================================================
 // JUMAA - FORGOT PASSWORD
 // ============================================================
 
@@ -14493,7 +14535,8 @@ class JUMAAForgotPasswordPage extends StatefulWidget {
       _JUMAAForgotPasswordPageState();
 }
 
-class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
+class _JUMAAForgotPasswordPageState
+    extends State<JUMAAForgotPasswordPage> {
   final _emailController = TextEditingController();
 
   bool _loading = false;
@@ -14509,22 +14552,8 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
 
     if (email.isEmpty || !email.contains('@')) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid email address.')),
-      );
-      return;
-    }
-
-    await OpenNestStore.loadOwners();
-
-    if (!mounted) return;
-
-    final owner = OpenNestStore.findOwnerByEmail(email);
-
-    if (owner == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No JUMAA account was found with this email.'),
-          behavior: SnackBarBehavior.floating,
+          content: Text('Enter a valid email address.'),
         ),
       );
       return;
@@ -14534,13 +14563,8 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
       _loading = true;
     });
 
-    final code = (10000 + DateTime.now().millisecondsSinceEpoch % 90000)
-        .toString();
-
-    final emailSent = await JumaaEmailService.sendPasswordResetCode(
-      name: owner.fullName,
-      email: owner.email,
-      code: code,
+    final result = await JUMAAPasswordResetService.requestCode(
+      email: email,
     );
 
     if (!mounted) return;
@@ -14549,11 +14573,12 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
       _loading = false;
     });
 
-    if (!emailSent) {
+    if (result['success'] != true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'We could not send the verification email. Please try again.',
+            result['error']?.toString() ??
+                'We could not process your request. Please try again.',
           ),
           behavior: SnackBarBehavior.floating,
         ),
@@ -14564,7 +14589,7 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => JUMAAVerifyCodePage(owner: owner, code: code),
+        builder: (_) => JUMAAVerifyCodePage(email: email),
       ),
     );
   }
@@ -14604,9 +14629,12 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
           const SizedBox(height: 10),
 
           const Text(
-            'Enter your JUMAA email address and we will send a verification code.',
+            'Enter your JUMAA email address and we will send you a verification code.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.black54, height: 1.4),
+            style: TextStyle(
+              color: Colors.black54,
+              height: 1.4,
+            ),
           ),
 
           const SizedBox(height: 30),
@@ -14614,7 +14642,11 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
           TextField(
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,
-            style: const TextStyle(color: Colors.black, fontSize: 16),
+            autocorrect: false,
+            style: const TextStyle(
+              color: Colors.black,
+              fontSize: 16,
+            ),
             decoration: InputDecoration(
               labelText: 'Email address',
               prefixIcon: const Icon(Icons.email_outlined),
@@ -14641,10 +14673,19 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
                 ),
               ),
               child: _loading
-                  ? const CircularProgressIndicator(color: Colors.white)
+                  ? const SizedBox(
+                      height: 24,
+                      width: 24,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2.5,
+                      ),
+                    )
                   : const Text(
                       'SEND VERIFICATION CODE',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
             ),
           ),
@@ -14652,9 +14693,13 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
           const SizedBox(height: 18),
 
           const Text(
-            'A verification code has been sent to your email address.',
+            'If an account exists for this email, a verification code will be sent.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.black45, fontSize: 12, height: 1.4),
+            style: TextStyle(
+              color: Colors.black45,
+              fontSize: 12,
+              height: 1.4,
+            ),
           ),
         ],
       ),
@@ -14669,19 +14714,21 @@ class _JUMAAForgotPasswordPageState extends State<JUMAAForgotPasswordPage> {
 class JUMAAVerifyCodePage extends StatefulWidget {
   const JUMAAVerifyCodePage({
     super.key,
-    required this.owner,
-    required this.code,
+    required this.email,
   });
 
-  final Owner owner;
-  final String code;
+  final String email;
 
   @override
-  State<JUMAAVerifyCodePage> createState() => _JUMAAVerifyCodePageState();
+  State<JUMAAVerifyCodePage> createState() =>
+      _JUMAAVerifyCodePageState();
 }
 
-class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
+class _JUMAAVerifyCodePageState
+    extends State<JUMAAVerifyCodePage> {
   final _codeController = TextEditingController();
+
+  bool _verifying = false;
 
   @override
   void dispose() {
@@ -14689,11 +14736,55 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
     super.dispose();
   }
 
-  void _verify() {
-    if (_codeController.text.trim() != widget.code) {
+  Future<void> _verify() async {
+    final code = _codeController.text.trim();
+
+    if (!RegExp(r'^\d{5}$').hasMatch(code)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Incorrect verification code.'),
+          content: Text('Enter the 5-digit verification code.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _verifying = true;
+    });
+
+    final result = await JUMAAPasswordResetService.verifyCode(
+      email: widget.email,
+      code: code,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _verifying = false;
+    });
+
+    if (result['success'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result['error']?.toString() ??
+                'Invalid verification code.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final resetToken = result['reset_token']?.toString();
+
+    if (resetToken == null || resetToken.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Verification succeeded, but the reset session could not be created.',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -14703,7 +14794,10 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (_) => JUMAACreateNewPasswordPage(owner: widget.owner),
+        builder: (_) => JUMAACreateNewPasswordPage(
+          email: widget.email,
+          resetToken: resetToken,
+        ),
       ),
     );
   }
@@ -14743,12 +14837,15 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
           const SizedBox(height: 10),
 
           Text(
-            'A verification code was sent to ${widget.owner.email}.',
+            'Enter the 5-digit verification code sent to ${widget.email}.',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.black54),
+            style: const TextStyle(
+              color: Colors.black54,
+              height: 1.4,
+            ),
           ),
 
-          const SizedBox(height: 25),
+          const SizedBox(height: 30),
 
           Container(
             padding: const EdgeInsets.all(18),
@@ -14756,31 +14853,29 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
               color: const Color(0xFFE8F3EF),
               borderRadius: BorderRadius.circular(18),
             ),
-            child: Column(
+            child: const Column(
               children: [
-                const Text(
-                  'Your JUMAA verification code is',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Color(0xFF285548)),
+                Icon(
+                  Icons.security_rounded,
+                  size: 38,
+                  color: Color(0xFF0B3D2E),
                 ),
-
-                const SizedBox(height: 10),
-
+                SizedBox(height: 10),
                 Text(
-                  widget.code,
-                  style: const TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 5,
-                    color: Color(0xFF0B3D2E),
+                  'A verification code has been sent to your email.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFF285548),
                   ),
                 ),
-
-                const SizedBox(height: 8),
-
-                const Text(
-                  "Don't share this code with anyone.",
-                  style: TextStyle(color: Colors.black54, fontSize: 12),
+                SizedBox(height: 6),
+                Text(
+                  'The code expires in 10 minutes.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.black54,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
@@ -14793,18 +14888,20 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
             keyboardType: TextInputType.number,
             maxLength: 5,
             textAlign: TextAlign.center,
+            autocorrect: false,
             style: const TextStyle(
               color: Colors.black,
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 3,
+              fontSize: 24,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 5,
             ),
             cursorColor: const Color(0xFF0B3D2E),
             decoration: InputDecoration(
-              labelText: 'Enter verification code',
+              labelText: 'Verification code',
               prefixIcon: const Icon(Icons.pin_outlined),
               filled: true,
               fillColor: Colors.white,
+              counterText: '',
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide.none,
@@ -14812,12 +14909,12 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
             ),
           ),
 
-          const SizedBox(height: 15),
+          const SizedBox(height: 20),
 
           SizedBox(
             height: 55,
             child: ElevatedButton(
-              onPressed: _verify,
+              onPressed: _verifying ? null : _verify,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF0B3D2E),
                 foregroundColor: Colors.white,
@@ -14825,10 +14922,21 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
                   borderRadius: BorderRadius.circular(17),
                 ),
               ),
-              child: const Text(
-                'VERIFY CODE',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
+              child: _verifying
+                  ? const SizedBox(
+                      height: 24,
+                      width: 24,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2.5,
+                      ),
+                    )
+                  : const Text(
+                      'VERIFY CODE',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
             ),
           ),
         ],
@@ -14842,9 +14950,14 @@ class _JUMAAVerifyCodePageState extends State<JUMAAVerifyCodePage> {
 // ============================================================
 
 class JUMAACreateNewPasswordPage extends StatefulWidget {
-  const JUMAACreateNewPasswordPage({super.key, required this.owner});
+  const JUMAACreateNewPasswordPage({
+    super.key,
+    required this.email,
+    required this.resetToken,
+  });
 
-  final Owner owner;
+  final String email;
+  final String resetToken;
 
   @override
   State<JUMAACreateNewPasswordPage> createState() =>
@@ -14871,19 +14984,25 @@ class _JUMAACreateNewPasswordPageState
     final password = _passwordController.text;
     final confirm = _confirmController.text;
 
-    if (password.length < 6) {
+    if (password.length < 8) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Password must be at least 6 characters.'),
+          content: Text(
+            'Password must be at least 8 characters.',
+          ),
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
 
     if (password != confirm) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Passwords do not match.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Passwords do not match.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
       return;
     }
 
@@ -14891,9 +15010,11 @@ class _JUMAACreateNewPasswordPageState
       _saving = true;
     });
 
-    widget.owner.password = password;
-
-    await OpenNestStore.saveOwners();
+    final result =
+        await JUMAAPasswordResetService.resetPassword(
+      resetToken: widget.resetToken,
+      newPassword: password,
+    );
 
     if (!mounted) return;
 
@@ -14901,20 +15022,39 @@ class _JUMAACreateNewPasswordPageState
       _saving = false;
     });
 
+    if (result['success'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result['error']?.toString() ??
+                'Could not reset your password.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Password reset successfully.'),
+        content: Text(
+          'Password reset successfully. Please log in with your new password.',
+        ),
         behavior: SnackBarBehavior.floating,
       ),
     );
 
-    await Future.delayed(const Duration(milliseconds: 700));
+    await Future.delayed(
+      const Duration(milliseconds: 900),
+    );
 
     if (!mounted) return;
 
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => const JUMAALoginPage()),
+      MaterialPageRoute(
+        builder: (_) => const JUMAALoginPage(),
+      ),
       (route) => false,
     );
   }
@@ -14956,7 +15096,9 @@ class _JUMAACreateNewPasswordPageState
           const Text(
             'Choose a strong password for your JUMAA account.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.black54),
+            style: TextStyle(
+              color: Colors.black54,
+            ),
           ),
 
           const SizedBox(height: 30),
@@ -14964,7 +15106,10 @@ class _JUMAACreateNewPasswordPageState
           TextField(
             controller: _passwordController,
             obscureText: _obscurePassword,
-            style: const TextStyle(color: Colors.black, fontSize: 16),
+            style: const TextStyle(
+              color: Colors.black,
+              fontSize: 16,
+            ),
             cursorColor: const Color(0xFF0B3D2E),
             decoration: InputDecoration(
               labelText: 'New password',
@@ -14972,7 +15117,8 @@ class _JUMAACreateNewPasswordPageState
               suffixIcon: IconButton(
                 onPressed: () {
                   setState(() {
-                    _obscurePassword = !_obscurePassword;
+                    _obscurePassword =
+                        !_obscurePassword;
                   });
                 },
                 icon: Icon(
@@ -14995,13 +15141,20 @@ class _JUMAACreateNewPasswordPageState
           TextField(
             controller: _confirmController,
             obscureText: _obscureConfirm,
+            style: const TextStyle(
+              color: Colors.black,
+              fontSize: 16,
+            ),
             decoration: InputDecoration(
               labelText: 'Confirm new password',
-              prefixIcon: const Icon(Icons.lock_reset_outlined),
+              prefixIcon: const Icon(
+                Icons.lock_reset_outlined,
+              ),
               suffixIcon: IconButton(
                 onPressed: () {
                   setState(() {
-                    _obscureConfirm = !_obscureConfirm;
+                    _obscureConfirm =
+                        !_obscureConfirm;
                   });
                 },
                 icon: Icon(
@@ -15019,12 +15172,24 @@ class _JUMAACreateNewPasswordPageState
             ),
           ),
 
+          const SizedBox(height: 12),
+
+          const Text(
+            'Use at least 8 characters. Do not reuse an old password.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.black45,
+              fontSize: 12,
+            ),
+          ),
+
           const SizedBox(height: 25),
 
           SizedBox(
             height: 55,
             child: ElevatedButton(
-              onPressed: _saving ? null : _resetPassword,
+              onPressed:
+                  _saving ? null : _resetPassword,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF0B3D2E),
                 foregroundColor: Colors.white,
@@ -15033,10 +15198,19 @@ class _JUMAACreateNewPasswordPageState
                 ),
               ),
               child: _saving
-                  ? const CircularProgressIndicator(color: Colors.white)
+                  ? const SizedBox(
+                      height: 24,
+                      width: 24,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2.5,
+                      ),
+                    )
                   : const Text(
                       'RESET PASSWORD',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
             ),
           ),
