@@ -54,3 +54,6 @@ app.*.map.json
 *.backup_*
 *.before_*
 *.before-*
+
+# Firebase Admin SDK private key
+jumaa-app-2026-firebase-adminsdk-fbsvc-356e94520c.json

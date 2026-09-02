@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 import 'dart:io';
 
@@ -21,6 +22,8 @@ import 'screens/admin/admin_dashboard.dart';
 import 'screens/landlord/landlord_dashboard.dart';
 import 'screens/jumaa_owner/jumaa_owner_dashboard.dart';
 import 'services/booking_service.dart';
+import 'services/notification_service.dart';
+import 'firebase_options.dart';
 
 // ============================================================
 // JUMAA EMAIL SERVICE
@@ -166,13 +169,28 @@ class JumaaEmailService {
   }
 }
 
+
+Future<void> _initializeFirebaseMessaging() async {
+  try {
+    await NotificationService.instance.initialize();
+  } catch (e) {
+    debugPrint('FCM service initialization failed: $e');
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   await Supabase.initialize(
     url: 'https://pdezijwjfqyulkkuhoun.supabase.co',
     publishableKey: 'sb_publishable_wFuJsdho3es8WrD4vkqC_A_8MLx_0ft',
   );
+
+  await _initializeFirebaseMessaging();
 
   // Marketplace data is loaded by PublicUserPage when the
   // user opens Find an Apartment. Do not preload it here because
@@ -9257,6 +9275,13 @@ class _LandlordLoginPageState extends State<LandlordLoginPage> {
         throw const AuthException('Login failed.');
       }
 
+      // Register this landlord's phone for JUMAA push notifications.
+      try {
+        await NotificationService.instance.registerCurrentDevice();
+      } catch (e) {
+        debugPrint('LANDLORD LOGIN: Push token registration failed: $e');
+      }
+
       final landlord = await OpenNestStore.loadLandlordProfile();
 
       if (!mounted) return;
@@ -14056,6 +14081,15 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
 
       if (user == null) {
         throw Exception('Supabase did not return a user.');
+      }
+
+      // Register this phone for JUMAA push notifications.
+      // This is intentionally done once after authentication,
+      // before role-specific routing.
+      try {
+        await NotificationService.instance.registerCurrentDevice();
+      } catch (e) {
+        debugPrint('JUMAA LOGIN: Push token registration failed: $e');
       }
 
       debugPrint('JUMAA LOGIN: Supabase authentication successful.');

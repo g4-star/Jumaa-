@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "512660562520",
+    "project_id": "jumaa-app-2026",
+    "storage_bucket": "jumaa-app-2026.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:512660562520:android:1ed641b71190a51e96202d",
+        "android_client_info": {
+          "package_name": "com.example.apartment_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCEKQBGHyUDXnslr4A6THIo8-LmTUv02yQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
