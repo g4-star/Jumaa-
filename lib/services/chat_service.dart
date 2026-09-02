@@ -28,36 +28,30 @@ class ChatService {
       throw Exception('You must be logged in to chat.');
     }
 
-    final existing = await supabase
-        .from('conversations')
-        .select('id, conversation_participants!inner(profile_id)')
-        .eq('property_id', propertyId)
-        .eq('conversation_participants.profile_id', userId)
-        .limit(1);
-
-    if (existing.isNotEmpty) {
-      return existing.first['id'].toString();
+    if (propertyId.trim().isEmpty) {
+      throw Exception('Property information is missing.');
     }
 
-    final conversation = await supabase
-        .from('conversations')
-        .insert({'property_id': propertyId, 'unit_id': unitId})
-        .select('id')
-        .single();
+    if (landlordId.trim().isEmpty) {
+      throw Exception('Landlord information is missing.');
+    }
 
-    final conversationId = conversation['id'].toString();
+    final response = await supabase.rpc(
+      'get_or_create_apartment_conversation',
+      params: {
+        'p_property_id': propertyId,
+        'p_receiver_id': landlordId,
+      },
+    );
 
-    await supabase.from('conversation_participants').insert([
-      {'conversation_id': conversationId, 'profile_id': userId},
-      {'conversation_id': conversationId, 'profile_id': landlordId},
-    ]);
+    final conversationId = response?.toString().trim();
+
+    if (conversationId == null || conversationId.isEmpty) {
+      throw Exception('Could not create the conversation.');
+    }
 
     return conversationId;
   }
-
-  // ============================================================
-  // LOAD MESSAGES
-  // ============================================================
 
   Future<List<Message>> getMessages({required String conversationId}) async {
     final response = await supabase

@@ -49,19 +49,21 @@ class BookingService {
       'BOOKING DEBUG 2: inserting into booking_requests...',
     );
 
-    final response = await _supabase
-        .from('booking_requests')
-        .insert({
-          'property_id': propertyId,
-          'unit_id': unitId,
-          'applicant_name': applicantName,
-          'applicant_email': applicantEmail,
-          'applicant_phone': applicantPhone,
-          'additional_notes': additionalNotes,
-          'status': 'pending',
-        })
-        .select()
-        .single();
+    final response = await _supabase.rpc(
+      'create_booking_request',
+      params: {
+        'p_property_id': propertyId,
+        'p_unit_id': unitId,
+        'p_applicant_name': applicantName,
+        'p_applicant_email': applicantEmail,
+        'p_applicant_phone': applicantPhone,
+        'p_additional_notes': additionalNotes,
+      },
+    );
+
+    if (response == null) {
+      throw Exception('Booking request could not be created.');
+    }
 
     final booking = Map<String, dynamic>.from(response);
 

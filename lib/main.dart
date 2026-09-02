@@ -4091,47 +4091,25 @@ class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
 
                   const SizedBox(height: 30),
 
-                  // ACTION BUTTONS
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _startChat,
-                          icon: const Icon(Icons.chat_bubble_outline_rounded),
-                          label: const Text(
-                            'CHAT LANDLORD',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
+                  // BOOKING ACTION
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: availableUnits.isEmpty
+                          ? null
+                          : _openBookingForm,
+                      icon: const Icon(Icons.calendar_month_rounded),
+                      label: const Text(
+                        'BOOK NOW',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-
-                      const SizedBox(width: 12),
-
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: availableUnits.isEmpty
-                              ? null
-                              : _openBookingForm,
-                          icon: const Icon(Icons.calendar_month_rounded),
-                          label: const Text(
-                            'BOOK NOW',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
@@ -4373,68 +4351,6 @@ class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
     );
   }
 
-  Future<void> _startChat() async {
-    try {
-      final response = await OpenNestStore.supabase
-          .from('properties')
-          .select('owner_id, landlord_id')
-          .eq('id', widget.property.id)
-          .maybeSingle();
-
-      final landlordId =
-          response?['landlord_id']?.toString() ??
-          response?['owner_id']?.toString() ??
-          widget.property.ownerId;
-
-      debugPrint('CHAT DEBUG: property=${widget.property.id}');
-      debugPrint('CHAT DEBUG: ownerId=${response?['owner_id']}');
-      debugPrint('CHAT DEBUG: landlordId=${response?['landlord_id']}');
-      debugPrint('CHAT DEBUG: resolvedLandlordId=$landlordId');
-
-      if (landlordId.isEmpty) {
-        if (!mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No landlord is assigned to this apartment.'),
-          ),
-        );
-        return;
-      }
-
-      final landlord = await OpenNestStore.loadLandlordById(landlordId);
-
-      if (!mounted) return;
-
-      if (landlord == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not find the landlord for this apartment.'),
-          ),
-        );
-        return;
-      }
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ChatListScreen(
-            landlordId: landlord.id,
-            landlordName: landlord.fullName,
-            propertyId: widget.property.id,
-            propertyName: widget.property.name,
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to open landlord chat: $e')),
-      );
-    }
-  }
-
   void _openBookingForm() {
     _showBookingDialog();
   }
@@ -4642,7 +4558,8 @@ class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
                                         content: Text(
-                                          'Booking request submitted successfully.',
+                                          'Your booking request has been successfully submitted. '
+'You will receive a notification via email once the landlord responds.',
                                         ),
                                         behavior: SnackBarBehavior.floating,
                                       ),
@@ -15299,6 +15216,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   String get _currentUserId =>
       widget.tenantProfile?['auth_user_id']?.toString() ??
       widget.tenantProfile?['user_id']?.toString() ??
+      OpenNestStore.supabase.auth.currentUser?.id ??
       '';
 
   String get _propertyId =>
