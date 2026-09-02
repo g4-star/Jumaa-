@@ -15,6 +15,10 @@ interface BookingRequestPayload {
   booking_id: string;
 }
 
+interface NotificationPayload {
+  notification_id: string;
+}
+
 function base64UrlEncode(data: Uint8Array): string {
   let binary = '';
 
@@ -217,6 +221,188 @@ Deno.serve(async (req) => {
     const body = await req.json();
 
     // Accept both direct calls and Supabase Database Webhook payloads.
+    // ============================================================
+    // GENERIC NOTIFICATION EVENT
+    // Handles rows inserted into public.notifications.
+    // ============================================================
+    const notificationId =
+      body?.notification_id ??
+      body?.record?.id ??
+      body?.new?.id;
+
+    const eventTable =
+      body?.table ??
+      body?.record?.table ??
+      body?.new?.table ??
+      body?.table_name;
+
+    if (
+      eventTable === 'notifications' ||
+      body?.type === 'notification' ||
+      body?.notification_id
+    ) {
+      if (!notificationId) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'notification_id could not be determined from the request.',
+          }),
+          {
+            status: 400,
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'application/json',
+            },
+          },
+        );
+      }
+
+      const supabaseHeaders = {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+      };
+
+      // Load the notification.
+      const notificationResponse = await fetch(
+        `${SUPABASE_URL}/rest/v1/notifications?id=eq.${encodeURIComponent(notificationId)}&select=id,user_id,property_id,title,message,type,is_read,sender_type,sender_name`,
+        {
+          headers: supabaseHeaders,
+        },
+      );
+
+      if (!notificationResponse.ok) {
+        throw new Error('Failed to load notification.');
+      }
+
+      const notificationRows = await notificationResponse.json();
+
+      if (!notificationRows.length) {
+        throw new Error('Notification not found.');
+      }
+
+      const notification = notificationRows[0];
+
+      if (!notification.user_id) {
+        throw new Error('Notification recipient could not be determined.');
+      }
+
+      const title = notification.title ?? 'JUMAA Notification';
+      const message = notification.message ?? 'You have a new notification.';
+
+      // Prevent duplicate push processing.
+      const eventResponse = await fetch(
+        `${SUPABASE_URL}/rest/v1/notification_events`,
+        {
+          method: 'POST',
+          headers: {
+            ...supabaseHeaders,
+            Prefer: 'return=representation,resolution=ignore-duplicates',
+          },
+          body: JSON.stringify({
+            event_type: 'notification',
+            event_id: notification.id,
+          }),
+        },
+      );
+
+      if (!eventResponse.ok) {
+        const result = await eventResponse.text();
+        console.error('Notification event registration failed:', result);
+        throw new Error('Failed to register notification event.');
+      }
+
+      const registeredEvents = await eventResponse.json();
+
+      if (!registeredEvents.length) {
+        console.log(
+          `Notification ${notification.id} has already been processed.`,
+        );
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            duplicate: true,
+            notification_id: notification.id,
+          }),
+          {
+            status: 200,
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'application/json',
+            },
+          },
+        );
+      }
+
+      // Find every device registered to the notification recipient.
+      const tokenResponse = await fetch(
+        `${SUPABASE_URL}/rest/v1/push_tokens?user_id=eq.${encodeURIComponent(notification.user_id)}&select=id,token,platform`,
+        {
+          headers: supabaseHeaders,
+        },
+      );
+
+      if (!tokenResponse.ok) {
+        throw new Error('Failed to load recipient push tokens.');
+      }
+
+      const tokens = await tokenResponse.json();
+
+      const pushResults = [];
+
+      for (const tokenRecord of tokens) {
+        try {
+          await sendFcmNotification(
+            tokenRecord.token,
+            title,
+            message,
+            {
+              type: String(notification.type ?? 'general'),
+              notification_id: String(notification.id),
+              property_id: String(notification.property_id ?? ''),
+            },
+          );
+
+          pushResults.push({
+            token_id: tokenRecord.id,
+            success: true,
+          });
+        } catch (error) {
+          console.error(
+            `FCM failed for token ${tokenRecord.id}:`,
+            error,
+          );
+
+          pushResults.push({
+            token_id: tokenRecord.id,
+            success: false,
+          });
+        }
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          notification_id: notification.id,
+          user_id: notification.user_id,
+          push_devices: tokens.length,
+          push_results: pushResults,
+        }),
+        {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+    }
+
+    // ============================================================
+    // EXISTING BOOKING REQUEST FLOW
+    // ============================================================
+
     const bookingId =
       body?.booking_id ??
       body?.record?.id ??

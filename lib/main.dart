@@ -169,7 +169,6 @@ class JumaaEmailService {
   }
 }
 
-
 Future<void> _initializeFirebaseMessaging() async {
   try {
     await NotificationService.instance.initialize();
@@ -181,9 +180,7 @@ Future<void> _initializeFirebaseMessaging() async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   await Supabase.initialize(
     url: 'https://pdezijwjfqyulkkuhoun.supabase.co',
@@ -656,7 +653,7 @@ class _DashboardPageState extends State<DashboardPage> {
     const LandlordsPage(),
     const TenantsPage(),
     const ChatListScreen(),
-    const PaymentsPage(),
+    const OwnerPaymentsPage(),
     const _SubscriptionsPlaceholderPage(),
     SettingsPage(
       isDarkMode: widget.isDarkMode,
@@ -2109,7 +2106,7 @@ class DashboardHome extends StatelessWidget {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const PaymentsPage()),
+                  MaterialPageRoute(builder: (_) => const OwnerPaymentsPage()),
                 );
               },
             ),
@@ -2206,10 +2203,21 @@ class OwnerApartmentManagementPage extends StatefulWidget {
 class _OwnerApartmentManagementPageState
     extends State<OwnerApartmentManagementPage> {
   Property? get property {
-    if (OpenNestStore.properties.isEmpty) {
+    final user = OpenNestStore.supabase.auth.currentUser;
+
+    if (user == null) {
       return null;
     }
-    return OpenNestStore.properties.first;
+
+    final ownedProperties = OpenNestStore.properties
+        .where((property) => property.ownerId == user.id)
+        .toList();
+
+    if (ownedProperties.isEmpty) {
+      return null;
+    }
+
+    return ownedProperties.first;
   }
 
   List<Apartment> get units {
@@ -4577,7 +4585,7 @@ class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
                                       const SnackBar(
                                         content: Text(
                                           'Your booking request has been successfully submitted. '
-'You will receive a notification via email once the landlord responds.',
+                                          'You will receive a notification via email once the landlord responds.',
                                         ),
                                         behavior: SnackBarBehavior.floating,
                                       ),
@@ -6097,6 +6105,395 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
 // PAYMENTS PAGE
 // ============================================================
 
+// ============================================================
+// OWNER PAYMENTS PAGE
+// ============================================================
+
+class OwnerPaymentsPage extends StatefulWidget {
+  const OwnerPaymentsPage({super.key});
+
+  @override
+  State<OwnerPaymentsPage> createState() => _OwnerPaymentsPageState();
+}
+
+class _OwnerPaymentsPageState extends State<OwnerPaymentsPage> {
+  bool _loading = true;
+  String? _error;
+  List<Map<String, dynamic>> _payments = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPayments();
+  }
+
+  Future<void> _loadPayments() async {
+    if (!mounted) return;
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final user = OpenNestStore.supabase.auth.currentUser;
+
+      if (user == null) {
+        throw Exception('Owner session is missing. Please log in again.');
+      }
+
+      debugPrint('OWNER PAYMENTS: owner=${user.id}');
+
+      final propertyResponse = await OpenNestStore.supabase
+          .from('properties')
+          .select('id, name')
+          .eq('owner_id', user.id);
+
+      final properties = List<Map<String, dynamic>>.from(propertyResponse);
+
+      debugPrint('OWNER PAYMENTS: found ${properties.length} owned properties');
+
+      if (properties.isEmpty) {
+        if (!mounted) return;
+
+        setState(() {
+          _payments = [];
+          _loading = false;
+        });
+
+        return;
+      }
+
+      final propertyIds = properties
+          .map((row) => row['id']?.toString())
+          .where((id) => id != null && id.isNotEmpty)
+          .cast<String>()
+          .toList();
+
+      final propertyNames = <String, String>{};
+
+      for (final property in properties) {
+        final id = property['id']?.toString() ?? '';
+        final name = property['name']?.toString() ?? '';
+
+        if (id.isNotEmpty) {
+          propertyNames[id] = name;
+        }
+      }
+
+      final paymentResponse = await OpenNestStore.supabase
+          .from('payments')
+          .select('''
+            id,
+            tenant_id,
+            property_id,
+            unit_id,
+            amount,
+            payment_method,
+            payment_destination,
+            reference,
+            status,
+            payment_date,
+            due_date,
+            created_at
+          ''')
+          .inFilter('property_id', propertyIds)
+          .order('created_at', ascending: false);
+
+      final payments = List<Map<String, dynamic>>.from(paymentResponse);
+
+      for (final payment in payments) {
+        final propertyId = payment['property_id']?.toString() ?? '';
+
+        payment['property_name'] =
+            propertyNames[propertyId] ?? 'Unknown property';
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _payments = payments;
+        _loading = false;
+      });
+
+      debugPrint('OWNER PAYMENTS: loaded ${_payments.length} payment(s)');
+    } catch (e) {
+      debugPrint('OWNER PAYMENTS LOAD ERROR: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  String _formatAmount(dynamic amount) {
+    final value = double.tryParse(amount?.toString() ?? '');
+
+    if (value == null) {
+      return 'KSh 0.00';
+    }
+
+    return 'KSh ${value.toStringAsFixed(2)}';
+  }
+
+  String _formatDate(dynamic value) {
+    if (value == null) {
+      return 'Date unavailable';
+    }
+
+    final date = DateTime.tryParse(value.toString());
+
+    if (date == null) {
+      return value.toString();
+    }
+
+    return '${date.day.toString().padLeft(2, '0')}/'
+        '${date.month.toString().padLeft(2, '0')}/'
+        '${date.year}';
+  }
+
+  Color _statusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'completed':
+      case 'paid':
+      case 'success':
+        return Colors.green;
+      case 'pending':
+        return Colors.orange;
+      case 'failed':
+      case 'cancelled':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Payments',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadPayments,
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.error_outline,
+                      size: 55,
+                      color: Colors.red,
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Unable to load payments',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(_error!, textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: _loadPayments,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Try Again'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : _payments.isEmpty
+          ? RefreshIndicator(
+              onRefresh: _loadPayments,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: const [
+                  SizedBox(height: 180),
+                  Center(
+                    child: Icon(
+                      Icons.payments_outlined,
+                      size: 70,
+                      color: Colors.grey,
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Center(
+                    child: Text(
+                      'No payments yet',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 30),
+                    child: Text(
+                      'Tenant payments for your properties will appear here.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _loadPayments,
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: _payments.length,
+                itemBuilder: (context, index) {
+                  final payment = _payments[index];
+
+                  final status = payment['status']?.toString() ?? 'unknown';
+
+                  final reference = payment['reference']?.toString() ?? '';
+
+                  final method = payment['payment_method']?.toString() ?? '';
+
+                  final destination =
+                      payment['payment_destination']?.toString() ?? '';
+
+                  final propertyName =
+                      payment['property_name']?.toString() ??
+                      'Unknown property';
+
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const CircleAvatar(
+                                child: Icon(Icons.payments_outlined),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  propertyName,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                _formatAmount(payment['amount']),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.calendar_today_outlined,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                _formatDate(
+                                  payment['payment_date'] ??
+                                      payment['created_at'],
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (method.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.account_balance_wallet_outlined,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(method),
+                              ],
+                            ),
+                          ],
+                          if (destination.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.location_on_outlined,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(destination),
+                              ],
+                            ),
+                          ],
+                          if (reference.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.receipt_long_outlined,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(child: Text('Reference: $reference')),
+                              ],
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _statusColor(status)
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              status.toUpperCase(),
+                              style: TextStyle(
+                                color: _statusColor(status),
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+    );
+  }
+}
+
 class PaymentsPage extends StatefulWidget {
   final Map<String, dynamic>? tenantProfile;
 
@@ -6925,38 +7322,95 @@ class OpenNestStore {
   static final List<Landlord> landlords = [];
 
   static Future<void> loadLandlords() async {
-    final prefs = await SharedPreferences.getInstance();
-    final count = prefs.getInt('landlord_count') ?? 0;
+    try {
+      debugPrint('LANDLORDS: Loading landlords for current owner...');
 
-    landlords.clear();
+      final user = supabase.auth.currentUser;
 
-    for (int i = 0; i < count; i++) {
-      final email = prefs.getString('landlord_${i}_email');
-
-      if (email == null || email.isEmpty) {
-        continue;
+      if (user == null) {
+        debugPrint('LANDLORDS: No authenticated user.');
+        landlords.clear();
+        return;
       }
 
-      landlords.add(
-        Landlord(
-          id:
-              prefs.getString('landlord_${i}_id') ??
-              DateTime.now().millisecondsSinceEpoch.toString(),
-          fullName: prefs.getString('landlord_${i}_fullName') ?? '',
-          email: email,
-          phone: prefs.getString('landlord_${i}_phone') ?? '',
-          temporaryPassword: prefs.getString('landlord_${i}_password') ?? '',
-          mustResetPassword: prefs.getBool('landlord_${i}_mustReset') ?? false,
-          propertyName:
-              prefs.getString('landlord_${i}_propertyName') ??
-              prefs.getString('landlord_${i}_apartment') ??
-              '',
-          propertyId:
-              prefs.getString('landlord_${i}_propertyId') ??
-              prefs.getString('landlord_${i}_apartmentId') ??
-              '',
-        ),
+      debugPrint('LANDLORDS: Current user = ${user.id}');
+
+      // Get only properties belonging to the logged-in owner.
+      final propertyRows = await supabase
+          .from('properties')
+          .select('id, name, landlord_id')
+          .eq('owner_id', user.id);
+
+      debugPrint(
+        'LANDLORDS: Found ${propertyRows.length} property/properties '
+        'for owner ${user.id}',
       );
+
+      final landlordIds = <String>[];
+
+      for (final row in propertyRows) {
+        final landlordId = row['landlord_id']?.toString();
+
+        if (landlordId != null &&
+            landlordId.isNotEmpty &&
+            !landlordIds.contains(landlordId)) {
+          landlordIds.add(landlordId);
+        }
+      }
+
+      landlords.clear();
+
+      if (landlordIds.isEmpty) {
+        debugPrint(
+          'LANDLORDS: No landlords assigned to this owner properties.',
+        );
+        return;
+      }
+
+      // Load only landlords assigned to those properties.
+      final landlordRows = await supabase
+          .from('landlords')
+          .select('id, full_name, email, phone')
+          .inFilter('id', landlordIds);
+
+      final propertiesByLandlordId = <String, Map<String, dynamic>>{};
+
+      for (final row in propertyRows) {
+        final landlordId = row['landlord_id']?.toString();
+
+        if (landlordId != null && landlordId.isNotEmpty) {
+          propertiesByLandlordId[landlordId] = Map<String, dynamic>.from(row);
+        }
+      }
+
+      for (final row in landlordRows) {
+        final landlordId = row['id']?.toString() ?? '';
+
+        if (landlordId.isEmpty) continue;
+
+        final property = propertiesByLandlordId[landlordId];
+
+        landlords.add(
+          Landlord(
+            id: landlordId,
+            fullName: row['full_name']?.toString() ?? '',
+            email: row['email']?.toString() ?? '',
+            phone: row['phone']?.toString() ?? '',
+            temporaryPassword: '',
+            mustResetPassword: false,
+            propertyName: property?['name']?.toString() ?? '',
+            propertyId: property?['id']?.toString() ?? '',
+          ),
+        );
+      }
+
+      debugPrint(
+        'LANDLORDS: Loaded ${landlords.length} landlord(s) '
+        'for owner ${user.id}.',
+      );
+    } catch (e) {
+      debugPrint('LANDLORDS LOAD ERROR: $e');
+      rethrow;
     }
   }
 
@@ -9719,6 +10173,47 @@ class LandlordsPage extends StatefulWidget {
 }
 
 class _LandlordsPageState extends State<LandlordsPage> {
+  bool _loadingLandlords = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLandlords();
+  }
+
+  Future<void> _loadLandlords() async {
+    if (_loadingLandlords) return;
+
+    setState(() {
+      _loadingLandlords = true;
+    });
+
+    try {
+      await OpenNestStore.loadLandlords();
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('LANDLORDS PAGE LOAD ERROR: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load landlords: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingLandlords = false;
+        });
+      }
+    }
+  }
+
   void _showAddLandlordDialog() {
     final nameController = TextEditingController();
     final emailController = TextEditingController();
@@ -9907,11 +10402,12 @@ class _LandlordsPageState extends State<LandlordsPage> {
                       propertyId: selectedProperty.id,
                     );
 
-                    setState(() {
-                      OpenNestStore.landlords.add(landlord);
-                    });
+                    // Reload the authoritative landlord list from Supabase.
+                    await OpenNestStore.loadLandlords();
 
-                    await OpenNestStore.saveLandlords();
+                    if (mounted) {
+                      setState(() {});
+                    }
 
                     if (!mounted || !dialogContext.mounted) return;
 
@@ -10236,16 +10732,8 @@ class _LandlordsPageState extends State<LandlordsPage> {
         );
       }
 
-      // Remove the landlord from the local store even when the
-      // Supabase account was already deleted manually.
-      OpenNestStore.landlords.removeWhere(
-        (item) =>
-            item.id == landlord.id ||
-            item.email.trim().toLowerCase() ==
-                landlord.email.trim().toLowerCase(),
-      );
-
-      await OpenNestStore.saveLandlords();
+      // Reload the authoritative landlord list from Supabase.
+      await OpenNestStore.loadLandlords();
 
       if (!mounted) return;
 
@@ -10275,7 +10763,9 @@ class _LandlordsPageState extends State<LandlordsPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Landlords')),
-      body: landlords.isEmpty
+      body: _loadingLandlords
+          ? const Center(child: CircularProgressIndicator())
+          : landlords.isEmpty
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),

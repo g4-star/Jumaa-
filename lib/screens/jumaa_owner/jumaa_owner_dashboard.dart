@@ -1734,7 +1734,10 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     if (confirmed != true) return;
 
     try {
-      await _supabase.rpc('delete_jumaa_user', params: {'p_user_id': userId});
+      await _supabase.rpc(
+        'delete_jumaa_apartment_owner',
+        params: {'p_owner_id': userId},
+      );
 
       if (!mounted) return;
 
