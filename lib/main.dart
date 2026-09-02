@@ -360,6 +360,8 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
   bool _loading = true;
   bool _loggedIn = false;
 
+  String? _restoredRole;
+
   Map<String, dynamic>? _tenantProfile;
 
   @override
@@ -426,6 +428,10 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
       }
 
       debugPrint('AUTH GATE: role=$role');
+
+      // Remember the restored role so the correct dashboard
+      // can be opened automatically after the app is restarted.
+      _restoredRole = role;
 
       // ----------------------------------------------------------
       // VALIDATE TENANT SESSION
@@ -544,6 +550,12 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
       // the user explicitly signs out.
       if (_tenantProfile != null) {
         return TenantDashboardPage(tenantProfile: _tenantProfile!);
+      }
+
+      // Restore the JUMAA platform owner directly to the
+      // JUMAA Owner Dashboard after restarting the app.
+      if (_restoredRole == 'jumaa_owner') {
+        return const JumaaOwnerDashboard();
       }
 
       return DashboardPage(
@@ -5261,6 +5273,8 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
         '${OpenNestStore.properties.length} properties, '
         '${OpenNestStore.apartments.length} units.',
       );
+
+      setState(() {});
     } catch (e) {
       debugPrint('APARTMENTS PAGE LOAD ERROR: $e');
 
@@ -7295,7 +7309,7 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
 
         state?._setDarkMode(enabled);
       },
-          showLogout: true,
+      showLogout: true,
     ),
   ];
 
@@ -7860,7 +7874,7 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
 
           state?._setDarkMode(enabled);
         },
-          showLogout: true,
+        showLogout: true,
       ),
     ];
 
@@ -12982,6 +12996,15 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
       });
 
       debugPrint('REGISTRATION STEP 2: Profile created');
+
+      await OpenNestStore.supabase.from('landlords').upsert({
+        'id': user.id,
+        'full_name': ownerName,
+        'email': email,
+        'phone': phone,
+      });
+
+      debugPrint('REGISTRATION STEP 2B: Landlord record created');
 
       // ----------------------------------------------------------
       // 2. Create the property belonging to this owner.
