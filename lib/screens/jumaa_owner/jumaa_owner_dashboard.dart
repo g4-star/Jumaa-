@@ -62,13 +62,11 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
 
         if (mounted) {
           setState(() {
-            _name =
-                profile?['full_name']?.toString().trim().isNotEmpty == true
-                    ? profile!['full_name'].toString()
-                    : 'JUMAA Owner';
+            _name = profile?['full_name']?.toString().trim().isNotEmpty == true
+                ? profile!['full_name'].toString()
+                : 'JUMAA Owner';
 
-            _email =
-                profile?['email']?.toString() ?? user.email ?? '';
+            _email = profile?['email']?.toString() ?? user.email ?? '';
           });
         }
       } catch (e) {
@@ -79,9 +77,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
       // PROPERTIES
       // ----------------------------------------------------------
       try {
-        final rows = await _supabase
-            .from('properties')
-            .select('id');
+        final rows = await _supabase.from('properties').select('id');
 
         if (mounted) {
           setState(() {
@@ -89,48 +85,41 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           });
         }
 
-        debugPrint(
-          'JUMAA OWNER: properties=$_properties',
-        );
+        debugPrint('JUMAA OWNER: properties=$_properties');
       } catch (e) {
-        debugPrint(
-          'JUMAA OWNER: properties query failed: $e',
-        );
+        debugPrint('JUMAA OWNER: properties query failed: $e');
       }
 
       // ----------------------------------------------------------
       // USERS / ROLES
       // ----------------------------------------------------------
       try {
-        final rows = await _supabase
-            .from('profiles')
-            .select('id,role');
+        final rows = await _supabase.from('profiles').select('id,role');
 
         final profiles = List<Map<String, dynamic>>.from(rows);
 
-        final owners = profiles.where(
-          (p) =>
-              p['role']?.toString().toLowerCase().trim() ==
-              'owner',
-        ).length;
+        final owners = profiles
+            .where((p) => p['role']?.toString().toLowerCase().trim() == 'owner')
+            .length;
 
-        final landlords = profiles.where(
-          (p) =>
-              p['role']?.toString().toLowerCase().trim() ==
-              'landlord',
-        ).length;
+        final landlords = profiles
+            .where(
+              (p) => p['role']?.toString().toLowerCase().trim() == 'landlord',
+            )
+            .length;
 
-        final tenants = profiles.where(
-          (p) =>
-              p['role']?.toString().toLowerCase().trim() ==
-              'tenant',
-        ).length;
+        final tenants = profiles
+            .where(
+              (p) => p['role']?.toString().toLowerCase().trim() == 'tenant',
+            )
+            .length;
 
-        final users = profiles.where(
-          (p) =>
-              p['role']?.toString().toLowerCase().trim() !=
-              'jumaa_owner',
-        ).length;
+        final users = profiles
+            .where(
+              (p) =>
+                  p['role']?.toString().toLowerCase().trim() != 'jumaa_owner',
+            )
+            .length;
 
         if (mounted) {
           setState(() {
@@ -148,18 +137,14 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           'tenants=$_tenants',
         );
       } catch (e) {
-        debugPrint(
-          'JUMAA OWNER: profiles query failed: $e',
-        );
+        debugPrint('JUMAA OWNER: profiles query failed: $e');
       }
 
       // ----------------------------------------------------------
       // UNITS
       // ----------------------------------------------------------
       try {
-        final rows = await _supabase
-            .from('units')
-            .select('id');
+        final rows = await _supabase.from('units').select('id');
 
         if (mounted) {
           setState(() {
@@ -167,13 +152,9 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           });
         }
 
-        debugPrint(
-          'JUMAA OWNER: units=$_units',
-        );
+        debugPrint('JUMAA OWNER: units=$_units');
       } catch (e) {
-        debugPrint(
-          'JUMAA OWNER: units query failed: $e',
-        );
+        debugPrint('JUMAA OWNER: units query failed: $e');
       }
 
       // ----------------------------------------------------------
@@ -189,14 +170,10 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
             .order('created_at', ascending: false)
             .limit(50);
 
-        final payments =
-            List<Map<String, dynamic>>.from(rows);
+        final payments = List<Map<String, dynamic>>.from(rows);
 
         final pending = payments.where((payment) {
-          return payment['status']
-                  ?.toString()
-                  .toLowerCase()
-                  .trim() ==
+          return payment['status']?.toString().toLowerCase().trim() ==
               'pending';
         }).length;
 
@@ -212,9 +189,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           'pending=$_pendingPayments',
         );
       } catch (e) {
-        debugPrint(
-          'JUMAA OWNER: subscription payments query failed: $e',
-        );
+        debugPrint('JUMAA OWNER: subscription payments query failed: $e');
       }
 
       // ----------------------------------------------------------
@@ -242,9 +217,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           });
         }
       } catch (e) {
-        debugPrint(
-          'JUMAA OWNER: user activity failed: $e',
-        );
+        debugPrint('JUMAA OWNER: user activity failed: $e');
       }
 
       try {
@@ -258,23 +231,18 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           activity.add({
             'type': 'property',
             'title': 'Property registered',
-            'subtitle':
-                row['name']?.toString() ?? 'New property',
+            'subtitle': row['name']?.toString() ?? 'New property',
             'created_at': row['created_at'],
           });
         }
       } catch (e) {
-        debugPrint(
-          'JUMAA OWNER: property activity failed: $e',
-        );
+        debugPrint('JUMAA OWNER: property activity failed: $e');
       }
 
       try {
         final rows = await _supabase
             .from('subscription_payments')
-            .select(
-              'id,status,reference,created_at',
-            )
+            .select('id,status,reference,created_at')
             .order('created_at', ascending: false)
             .limit(8);
 
@@ -289,23 +257,17 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           });
         }
       } catch (e) {
-        debugPrint(
-          'JUMAA OWNER: payment activity failed: $e',
-        );
+        debugPrint('JUMAA OWNER: payment activity failed: $e');
       }
 
       activity.sort((a, b) {
         final aDate =
-            DateTime.tryParse(
-                  a['created_at']?.toString() ?? '',
-                ) ??
-                DateTime.fromMillisecondsSinceEpoch(0);
+            DateTime.tryParse(a['created_at']?.toString() ?? '') ??
+            DateTime.fromMillisecondsSinceEpoch(0);
 
         final bDate =
-            DateTime.tryParse(
-                  b['created_at']?.toString() ?? '',
-                ) ??
-                DateTime.fromMillisecondsSinceEpoch(0);
+            DateTime.tryParse(b['created_at']?.toString() ?? '') ??
+            DateTime.fromMillisecondsSinceEpoch(0);
 
         return bDate.compareTo(aDate);
       });
@@ -317,18 +279,14 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
         });
       }
     } catch (e) {
-      debugPrint(
-        'JUMAA OWNER DASHBOARD ERROR: $e',
-      );
+      debugPrint('JUMAA OWNER DASHBOARD ERROR: $e');
 
       if (mounted) {
         setState(() => _loading = false);
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'Dashboard loaded with some unavailable data.',
-            ),
+            content: Text('Dashboard loaded with some unavailable data.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -343,12 +301,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
       body: SafeArea(
         child: IndexedStack(
           index: _currentIndex,
-          children: [
-            _home(),
-            _analytics(),
-            _activityPage(),
-            _profile(),
-          ],
+          children: [_home(), _analytics(), _activityPage(), _profile()],
         ),
       ),
       bottomNavigationBar: _bottomNavigation(),
@@ -413,9 +366,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
             height: 62,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [_purple, _pink, _orange],
-              ),
+              gradient: LinearGradient(colors: [_purple, _pink, _orange]),
             ),
             padding: const EdgeInsets.all(3),
             child: Container(
@@ -426,11 +377,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
               padding: const EdgeInsets.all(3),
               child: CircleAvatar(
                 backgroundColor: const Color(0xFFF1ECFF),
-                child: Icon(
-                  Icons.business_rounded,
-                  size: 27,
-                  color: _purple,
-                ),
+                child: Icon(Icons.business_rounded, size: 27, color: _purple),
               ),
             ),
           ),
@@ -455,11 +402,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
                             ),
                           ),
                           const SizedBox(width: 5),
-                          Icon(
-                            Icons.verified_rounded,
-                            size: 16,
-                            color: _blue,
-                          ),
+                          Icon(Icons.verified_rounded, size: 16, color: _blue),
                         ],
                       ),
                       const SizedBox(height: 2),
@@ -506,30 +449,15 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
             _purple,
           ),
           const SizedBox(width: 7),
-          _statCard(
-            'Users',
-            '$_users',
-            Icons.people_alt_rounded,
-            _blue,
-          ),
+          _statCard('Users', '$_users', Icons.people_alt_rounded, _blue),
           const SizedBox(width: 7),
-          _statCard(
-            'Revenue',
-            'KSh 0.00',
-            Icons.payments_rounded,
-            _green,
-          ),
+          _statCard('Revenue', 'KSh 0.00', Icons.payments_rounded, _green),
         ],
       ),
     );
   }
 
-  Widget _statCard(
-    String label,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
+  Widget _statCard(String label, String value, IconData icon, Color color) {
     return Expanded(
       child: Container(
         height: 86,
@@ -542,9 +470,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
             ],
           ),
           borderRadius: BorderRadius.circular(17),
-          border: Border.all(
-            color: color.withValues(alpha: .10),
-          ),
+          border: Border.all(color: color.withValues(alpha: .10)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -585,10 +511,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
         children: [
           Text(
             title,
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-            ),
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
           ),
           const Spacer(),
           if (title == 'Recent activity')
@@ -611,12 +534,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
   Widget _quickActions() {
     final actions = [
       ('Users', Icons.people_alt_rounded, _blue, () => _showUsers()),
-      (
-        'Properties',
-        Icons.home_work_rounded,
-        _purple,
-        () => _showProperties(),
-      ),
+      ('Properties', Icons.home_work_rounded, _purple, () => _showProperties()),
       (
         'Payments',
         Icons.account_balance_wallet_rounded,
@@ -668,11 +586,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
                       color: action.$3.withValues(alpha: .12),
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(
-                      action.$2,
-                      color: action.$3,
-                      size: 20,
-                    ),
+                    child: Icon(action.$2, color: action.$3, size: 20),
                   ),
                   const SizedBox(height: 5),
                   Text(
@@ -721,18 +635,16 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     final icon = type == 'property'
         ? Icons.home_work_rounded
         : type == 'payment'
-            ? Icons.payments_rounded
-            : Icons.person_add_alt_1_rounded;
+        ? Icons.payments_rounded
+        : Icons.person_add_alt_1_rounded;
 
     final color = type == 'property'
         ? _purple
         : type == 'payment'
-            ? _green
-            : _blue;
+        ? _green
+        : _blue;
 
-    final date = DateTime.tryParse(
-      activity['created_at']?.toString() ?? '',
-    );
+    final date = DateTime.tryParse(activity['created_at']?.toString() ?? '');
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 3, 16, 6),
@@ -769,20 +681,14 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
                   activity['subtitle']?.toString() ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.grey.shade600,
-                  ),
+                  style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
                 ),
               ],
             ),
           ),
           Text(
             _timeAgo(date),
-            style: TextStyle(
-              fontSize: 8,
-              color: Colors.grey.shade500,
-            ),
+            style: TextStyle(fontSize: 8, color: Colors.grey.shade500),
           ),
         ],
       ),
@@ -794,9 +700,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_purple, _pink],
-        ),
+        gradient: LinearGradient(colors: [_purple, _pink]),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -814,20 +718,13 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
                   ),
                 ),
               ),
-              const Icon(
-                Icons.insights_rounded,
-                color: Colors.white,
-                size: 27,
-              ),
+              const Icon(Icons.insights_rounded, color: Colors.white, size: 27),
             ],
           ),
           const SizedBox(height: 5),
           Text(
             '$_properties properties • $_units units • $_users users',
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 10,
-            ),
+            style: const TextStyle(color: Colors.white70, fontSize: 10),
           ),
           const SizedBox(height: 12),
           Row(
@@ -865,10 +762,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
               ),
               Text(
                 label,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 8,
-                ),
+                style: const TextStyle(color: Colors.white70, fontSize: 8),
               ),
             ],
           ),
@@ -893,24 +787,18 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           const SizedBox(height: 15),
           _analyticsGrid(),
           const SizedBox(height: 15),
-          _analyticsCard(
-            'Users',
-            [
-              ('Property Owners', _owners, _purple),
-              ('Landlords', _landlords, _orange),
-              ('Tenants', _tenants, _blue),
-            ],
-          ),
+          _analyticsCard('Users', [
+            ('Property Owners', _owners, _purple),
+            ('Landlords', _landlords, _orange),
+            ('Tenants', _tenants, _blue),
+          ]),
           const SizedBox(height: 12),
-          _analyticsCard(
-            'Platform',
-            [
-              ('Properties', _properties, _purple),
-              ('Units', _units, _cyan),
-              ('Payments', _payments, _green),
-              ('Pending', _pendingPayments, _orange),
-            ],
-          ),
+          _analyticsCard('Platform', [
+            ('Properties', _properties, _purple),
+            ('Units', _units, _cyan),
+            ('Payments', _payments, _green),
+            ('Pending', _pendingPayments, _orange),
+          ]),
           const SizedBox(height: 12),
           _revenueCard(),
         ],
@@ -942,12 +830,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     );
   }
 
-  Widget _metricBox(
-    String label,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
+  Widget _metricBox(String label, String value, IconData icon, Color color) {
     return Container(
       height: 105,
       padding: const EdgeInsets.all(13),
@@ -962,27 +845,18 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           const Spacer(),
           Text(
             value,
-            style: const TextStyle(
-              fontSize: 23,
-              fontWeight: FontWeight.w900,
-            ),
+            style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w900),
           ),
           Text(
             label,
-            style: TextStyle(
-              fontSize: 10,
-              color: Colors.grey.shade600,
-            ),
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
           ),
         ],
       ),
     );
   }
 
-  Widget _analyticsCard(
-    String title,
-    List<(String, int, Color)> items,
-  ) {
+  Widget _analyticsCard(String title, List<(String, int, Color)> items) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -994,10 +868,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
         children: [
           Text(
             title,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-            ),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 10),
           ...items.map(
@@ -1015,10 +886,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      item.$1,
-                      style: const TextStyle(fontSize: 11),
-                    ),
+                    child: Text(item.$1, style: const TextStyle(fontSize: 11)),
                   ),
                   Text(
                     '${item.$2}',
@@ -1040,28 +908,19 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_green, _cyan],
-        ),
+        gradient: LinearGradient(colors: [_green, _cyan]),
         borderRadius: BorderRadius.circular(19),
       ),
       child: const Row(
         children: [
-          Icon(
-            Icons.payments_rounded,
-            color: Colors.white,
-            size: 30,
-          ),
+          Icon(Icons.payments_rounded, color: Colors.white, size: 30),
           SizedBox(width: 12),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 'Revenue',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 10,
-                ),
+                style: TextStyle(color: Colors.white70, fontSize: 10),
               ),
               SizedBox(height: 2),
               Text(
@@ -1120,9 +979,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [_purple, _pink],
-            ),
+            gradient: LinearGradient(colors: [_purple, _pink]),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Row(
@@ -1168,11 +1025,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           ),
         ),
         const SizedBox(height: 14),
-        _profileTile(
-          Icons.person_outline_rounded,
-          'Name',
-          _name,
-        ),
+        _profileTile(Icons.person_outline_rounded, 'Name', _name),
         _profileTile(
           Icons.email_outlined,
           'Email',
@@ -1208,11 +1061,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     );
   }
 
-  Widget _profileTile(
-    IconData icon,
-    String title,
-    String value,
-  ) {
+  Widget _profileTile(IconData icon, String title, String value) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(13),
@@ -1230,10 +1079,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
               children: [
                 Text(
                   title,
-                  style: TextStyle(
-                    fontSize: 9,
-                    color: Colors.grey.shade500,
-                  ),
+                  style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -1284,10 +1130,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
               ),
               Text(
                 subtitle,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: Colors.grey.shade600,
-                ),
+                style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
               ),
             ],
           ),
@@ -1296,11 +1139,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     );
   }
 
-  Widget _emptyCard(
-    IconData icon,
-    String title,
-    String message,
-  ) {
+  Widget _emptyCard(IconData icon, String title, String message) {
     return Container(
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
@@ -1313,19 +1152,13 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           const SizedBox(height: 8),
           Text(
             title,
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 13,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
           ),
           const SizedBox(height: 3),
           Text(
             message,
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 10,
-            ),
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 10),
           ),
         ],
       ),
@@ -1363,10 +1196,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
               decoration: BoxDecoration(
                 color: _pink,
                 shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.white,
-                  width: 1.3,
-                ),
+                border: Border.all(color: Colors.white, width: 1.3),
               ),
             ),
           ),
@@ -1412,41 +1242,56 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     try {
       final rows = await _supabase
           .from('profiles')
-          .select('id,email,full_name,role,created_at')
-          .neq('role', 'jumaa_owner')
+          .select('id,email,full_name,role,created_at,account_status')
+          .eq('role', 'owner')
           .order('created_at', ascending: false);
 
       if (!mounted) return;
 
       _showListSheet(
-        'JUMAA Users',
-        Icons.people_alt_rounded,
+        'Apartment Owners',
+        Icons.business_rounded,
         _blue,
         List<Map<String, dynamic>>.from(rows),
         (item) {
-          final role = item['role']?.toString() ?? 'unknown';
+          final name = item['full_name']?.toString().trim().isNotEmpty == true
+              ? item['full_name'].toString()
+              : item['email']?.toString() ?? 'Apartment Owner';
+
+          final status =
+              item['account_status']?.toString().toLowerCase() ?? 'active';
+
+          final isSuspended = status == 'suspended';
 
           return ListTile(
             leading: CircleAvatar(
               backgroundColor: _blue.withValues(alpha: .12),
-              child: Icon(Icons.person_rounded, color: _blue),
+              child: Icon(Icons.business_rounded, color: _blue),
             ),
             title: Text(
-              item['full_name']?.toString().trim().isNotEmpty == true
-                  ? item['full_name'].toString()
-                  : item['email']?.toString() ?? 'User',
+              name,
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             subtitle: Text(
-              '${item['email'] ?? ''}\n$role',
-              style: const TextStyle(fontSize: 10),
+              '${item['email'] ?? ''}\n'
+              '${isSuspended ? 'Suspended' : 'Active'}',
+              style: TextStyle(
+                fontSize: 10,
+                color: isSuspended ? Colors.red : Colors.green,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             isThreeLine: true,
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () {
+              Navigator.pop(context);
+              _showOwnerDetails(item);
+            },
           );
         },
       );
     } catch (e) {
-      _showError('Could not load users: $e');
+      _showError('Could not load apartment owners: $e');
     }
   }
 
@@ -1470,10 +1315,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           return ListTile(
             leading: CircleAvatar(
               backgroundColor: _purple.withValues(alpha: .12),
-              child: Icon(
-                Icons.apartment_rounded,
-                color: _purple,
-              ),
+              child: Icon(Icons.apartment_rounded, color: _purple),
             ),
             title: Text(
               item['name']?.toString() ?? 'Property',
@@ -1515,10 +1357,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           return ListTile(
             leading: CircleAvatar(
               backgroundColor: _green.withValues(alpha: .12),
-              child: Icon(
-                Icons.payments_rounded,
-                color: _green,
-              ),
+              child: Icon(Icons.payments_rounded, color: _green),
             ),
             title: Text(
               'KSh ${item['amount'] ?? '0'}',
@@ -1668,7 +1507,9 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
       final properties = await _supabase
           .from('properties')
           .select('id,name,location,address,owner_id')
-          .or('name.ilike.%$query%,location.ilike.%$query%,address.ilike.%$query%')
+          .or(
+            'name.ilike.%$query%,location.ilike.%$query%,address.ilike.%$query%',
+          )
           .limit(20);
 
       if (!mounted) return;
@@ -1697,18 +1538,12 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
                   const SizedBox(height: 3),
                   Text(
                     'Results for "$query"',
-                    style: TextStyle(
-                      color: Colors.grey.shade600,
-                      fontSize: 11,
-                    ),
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
                   ),
                   const SizedBox(height: 15),
                   const Text(
                     'Users',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 7),
                   if (userRows.isEmpty)
@@ -1726,15 +1561,19 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
                             user['email']?.toString() ??
                             'User',
                         '${user['email'] ?? ''} • ${user['role'] ?? ''}',
+                        onTap: () {
+                          if (user['role']?.toString().toLowerCase() ==
+                              'owner') {
+                            Navigator.pop(context);
+                            _showOwnerDetails(user);
+                          }
+                        },
                       ),
                     ),
                   const SizedBox(height: 15),
                   const Text(
                     'Properties',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 7),
                   if (propertyRows.isEmpty)
@@ -1767,8 +1606,9 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     IconData icon,
     Color color,
     String title,
-    String subtitle,
-  ) {
+    String subtitle, {
+    VoidCallback? onTap,
+  }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 5),
       decoration: BoxDecoration(
@@ -1777,23 +1617,137 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
       ),
       child: ListTile(
         dense: true,
+        onTap: onTap,
         leading: CircleAvatar(
           backgroundColor: color.withValues(alpha: .12),
           child: Icon(icon, color: color, size: 19),
         ),
         title: Text(
           title,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
         ),
-        subtitle: Text(
-          subtitle,
-          style: const TextStyle(fontSize: 9),
+        subtitle: Text(subtitle, style: const TextStyle(fontSize: 9)),
+        trailing: const Icon(Icons.chevron_right_rounded, size: 18),
+      ),
+    );
+  }
+
+  Future<void> _showOwnerDetails(Map<String, dynamic> user) async {
+    debugPrint('JUMAA OWNER: Opening owner details: $user');
+
+    final userId = user['id']?.toString() ?? '';
+
+    if (userId.isEmpty) {
+      _showError('Owner ID is missing.');
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _JumaaOwnerDetailsPage(
+          supabase: _supabase,
+          owner: user,
+          onSuspend: (id, name, reason) async {
+            await _changeUserStatus(id, name, 'suspended', reason: reason);
+          },
+          onUnsuspend: (id, name) async {
+            await _changeUserStatus(id, name, 'active', reason: null);
+          },
+          onDelete: (id, name) async {
+            await _confirmDeleteUser(id, name);
+          },
         ),
       ),
     );
+
+    if (mounted) {
+      await _loadDashboard();
+    }
+  }
+
+  Future<void> _changeUserStatus(
+    String userId,
+    String name,
+    String newStatus, {
+    String? reason,
+  }) async {
+    try {
+      await _supabase
+          .from('profiles')
+          .update({
+            'account_status': newStatus,
+            'suspension_reason': newStatus == 'suspended' ? reason : null,
+            'suspended_at': newStatus == 'suspended'
+                ? DateTime.now().toIso8601String()
+                : null,
+          })
+          .eq('id', userId);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newStatus == 'suspended'
+                ? '$name has been suspended.'
+                : '$name has been unsuspended.',
+          ),
+        ),
+      );
+
+      await _loadDashboard();
+    } catch (e) {
+      _showError('Could not update owner: $e');
+    }
+  }
+
+  Future<void> _confirmDeleteUser(String userId, String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text(
+            'Delete apartment owner?',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+          content: Text(
+            'This permanently deletes $name and the JUMAA data associated '
+            'with this owner, including their properties and related '
+            'records. This action cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete permanently'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await _supabase.rpc('delete_jumaa_user', params: {'p_user_id': userId});
+
+      if (!mounted) return;
+
+      Navigator.of(context).pop();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$name has been permanently deleted.')),
+      );
+
+      await _loadDashboard();
+    } catch (e) {
+      _showError('Could not delete owner: $e');
+    }
   }
 
   void _showProfileMenu() {
@@ -1831,20 +1785,14 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
 
     if (!mounted) return;
 
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      '/',
-      (route) => false,
-    );
+    Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
   }
 
   void _showError(String message) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -1859,5 +1807,590 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     if (difference.inDays < 7) return '${difference.inDays}d';
 
     return '${date.day}/${date.month}';
+  }
+}
+
+class _JumaaOwnerDetailsPage extends StatefulWidget {
+  final SupabaseClient supabase;
+  final Map<String, dynamic> owner;
+  final Future<void> Function(String id, String name, String reason) onSuspend;
+  final Future<void> Function(String id, String name) onUnsuspend;
+  final Future<void> Function(String id, String name) onDelete;
+
+  const _JumaaOwnerDetailsPage({
+    required this.supabase,
+    required this.owner,
+    required this.onSuspend,
+    required this.onUnsuspend,
+    required this.onDelete,
+  });
+
+  @override
+  State<_JumaaOwnerDetailsPage> createState() => _JumaaOwnerDetailsPageState();
+}
+
+class _JumaaOwnerDetailsPageState extends State<_JumaaOwnerDetailsPage> {
+  bool _loading = true;
+  bool _working = false;
+
+  List<Map<String, dynamic>> _properties = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDetails();
+  }
+
+  Future<void> _loadDetails() async {
+    try {
+      final rows = await widget.supabase
+          .from('properties')
+          .select(
+            'id,name,description,location,address,phone,email,county,'
+            'subcounty,landlord_id,created_at',
+          )
+          .eq('owner_id', widget.owner['id'])
+          .order('created_at', ascending: false);
+
+      final properties = List<Map<String, dynamic>>.from(rows);
+
+      for (final property in properties) {
+        final units = await widget.supabase
+            .from('units')
+            .select('id')
+            .eq('property_id', property['id']);
+
+        property['unit_count'] = units.length;
+
+        final subscription = await widget.supabase
+            .from('subscriptions')
+            .select(
+              'id,unit_count,monthly_amount,status,'
+              'trial_ends_at,subscription_starts_at,'
+              'subscription_ends_at,credit_amount',
+            )
+            .eq('property_id', property['id'])
+            .maybeSingle();
+
+        property['subscription'] = subscription;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _properties = properties;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('OWNER DETAILS ERROR: $e');
+
+      if (!mounted) return;
+
+      setState(() => _loading = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load owner details: $e')),
+      );
+    }
+  }
+
+  String _money(dynamic value) {
+    if (value == null) return 'KSh 0';
+
+    final number = num.tryParse(value.toString()) ?? 0;
+
+    if (number % 1 == 0) {
+      return 'KSh ${number.toInt()}';
+    }
+
+    return 'KSh ${number.toStringAsFixed(2)}';
+  }
+
+  String _ownerName() {
+    final fullName = widget.owner['full_name']?.toString().trim();
+
+    if (fullName != null && fullName.isNotEmpty) {
+      return fullName;
+    }
+
+    return widget.owner['email']?.toString() ?? 'Apartment Owner';
+  }
+
+  bool get _suspended =>
+      widget.owner['account_status']?.toString().toLowerCase() == 'suspended';
+
+  Future<void> _showSuspendDialog() async {
+    String reason = 'Late subscription';
+    final customController = TextEditingController();
+
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final isOther = reason == 'Other';
+
+            return AlertDialog(
+              title: const Text(
+                'Suspend owner',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: reason,
+                    decoration: const InputDecoration(
+                      labelText: 'Reason',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'Late subscription',
+                        child: Text('Late subscription'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Policy violation',
+                        child: Text('Policy violation'),
+                      ),
+                      DropdownMenuItem(value: 'Other', child: Text('Other')),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setDialogState(() => reason = value);
+                    },
+                  ),
+                  if (isOther) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: customController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Custom reason',
+                        hintText: 'Enter the reason for suspension',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+                  onPressed: () {
+                    final finalReason = isOther
+                        ? customController.text.trim()
+                        : reason;
+
+                    if (finalReason.isEmpty) return;
+
+                    Navigator.pop(dialogContext, finalReason);
+                  },
+                  child: const Text('Suspend'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    customController.dispose();
+
+    if (selected == null) return;
+
+    setState(() => _working = true);
+
+    try {
+      await widget.onSuspend(
+        widget.owner['id'].toString(),
+        _ownerName(),
+        selected,
+      );
+
+      if (!mounted) return;
+
+      setState(() => _working = false);
+      Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _working = false);
+      }
+    }
+  }
+
+  Future<void> _unsuspend() async {
+    setState(() => _working = true);
+
+    try {
+      await widget.onUnsuspend(widget.owner['id'].toString(), _ownerName());
+
+      if (!mounted) return;
+
+      setState(() => _working = false);
+      Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _working = false);
+      }
+    }
+  }
+
+  Future<void> _delete() async {
+    setState(() => _working = true);
+
+    try {
+      await widget.onDelete(widget.owner['id'].toString(), _ownerName());
+    } finally {
+      if (mounted) {
+        setState(() => _working = false);
+      }
+    }
+  }
+
+  Widget _infoCard({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.withValues(alpha: .10)),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: color.withValues(alpha: .10),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _propertyCard(Map<String, dynamic> property) {
+    final subscription = property['subscription'] as Map<String, dynamic>?;
+
+    final unitCount = (property['unit_count'] as int?) ?? 0;
+
+    final monthlyAmount = subscription?['monthly_amount'];
+
+    final subscriptionStatus =
+        subscription?['status']?.toString() ?? 'Not configured';
+
+    final locationParts = [
+      property['county']?.toString(),
+      property['subcounty']?.toString(),
+      property['location']?.toString(),
+      property['address']?.toString(),
+    ].where((value) => value != null && value.trim().isNotEmpty);
+
+    final location = locationParts.join(', ');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+            color: Colors.black.withValues(alpha: .035),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: const Color(0xFF7C3AED).withValues(alpha: .10),
+                child: const Icon(
+                  Icons.apartment_rounded,
+                  color: Color(0xFF7C3AED),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  property['name']?.toString() ?? 'Property',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (location.isNotEmpty)
+            _infoCard(
+              icon: Icons.location_on_rounded,
+              color: Colors.red,
+              title: 'Location',
+              value: location,
+            ),
+          const SizedBox(height: 8),
+          _infoCard(
+            icon: Icons.meeting_room_rounded,
+            color: const Color(0xFF2563EB),
+            title: 'Units',
+            value: '$unitCount units',
+          ),
+          const SizedBox(height: 8),
+          _infoCard(
+            icon: Icons.payments_rounded,
+            color: const Color(0xFF059669),
+            title: 'JUMAA monthly subscription',
+            value: monthlyAmount == null
+                ? 'Not configured'
+                : _money(monthlyAmount),
+          ),
+          const SizedBox(height: 8),
+          _infoCard(
+            icon: Icons.verified_rounded,
+            color: Colors.orange,
+            title: 'Subscription status',
+            value: subscriptionStatus.toUpperCase(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = _ownerName();
+    final email = widget.owner['email']?.toString() ?? '';
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F8FC),
+      appBar: AppBar(
+        title: const Text(
+          'Owner Details',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        elevation: 0,
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF7C3AED), Color(0xFFEC4899)],
+                      ),
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 30,
+                          backgroundColor: Colors.white,
+                          child: Text(
+                            name.isNotEmpty ? name[0].toUpperCase() : 'O',
+                            style: const TextStyle(
+                              fontSize: 23,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF7C3AED),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 13),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                email,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: .85),
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 7),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 9,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: .16),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  _suspended ? 'SUSPENDED' : 'ACTIVE',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Owner Information',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 9),
+                  _infoCard(
+                    icon: Icons.email_rounded,
+                    color: const Color(0xFF2563EB),
+                    title: 'Email',
+                    value: email.isEmpty ? 'Not available' : email,
+                  ),
+                  const SizedBox(height: 8),
+                  _infoCard(
+                    icon: Icons.account_circle_rounded,
+                    color: const Color(0xFF7C3AED),
+                    title: 'Account status',
+                    value: _suspended ? 'Suspended' : 'Active',
+                  ),
+                  if (_suspended &&
+                      widget.owner['suspension_reason']
+                              ?.toString()
+                              .trim()
+                              .isNotEmpty ==
+                          true) ...[
+                    const SizedBox(height: 8),
+                    _infoCard(
+                      icon: Icons.info_outline_rounded,
+                      color: Colors.orange,
+                      title: 'Suspension reason',
+                      value: widget.owner['suspension_reason'].toString(),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      const Text(
+                        'Properties',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${_properties.length}',
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 9),
+                  if (_properties.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(17),
+                      ),
+                      child: const Text(
+                        'No properties are currently associated with this owner.',
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  else
+                    ..._properties.map(_propertyCard),
+                ],
+              ),
+            ),
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _working
+                    ? null
+                    : (_suspended ? _unsuspend : _showSuspendDialog),
+                icon: Icon(
+                  _suspended ? Icons.lock_open_rounded : Icons.block_rounded,
+                ),
+                label: Text(_suspended ? 'Unsuspend' : 'Suspend'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _suspended ? Colors.green : Colors.orange,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _working ? null : _delete,
+                icon: const Icon(Icons.delete_forever_rounded),
+                label: const Text('Delete'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
