@@ -25,11 +25,8 @@ class NotificationService {
         'FCM permission status: ${settings.authorizationStatus}',
       );
 
-      final user = _supabase.auth.currentUser;
-
-      if (user != null) {
-        await registerCurrentDevice();
-      }
+      // Device registration is handled explicitly after authentication.
+      // Do not register during startup/session restoration.
 
       _messaging.onTokenRefresh.listen((token) async {
         debugPrint('FCM token refreshed.');
@@ -48,11 +45,20 @@ class NotificationService {
       final user = _supabase.auth.currentUser;
 
       if (user == null) {
-        debugPrint('No authenticated user. FCM token not registered.');
+        debugPrint('FCM REGISTER: No authenticated user. Token not registered.');
         return;
       }
 
+      debugPrint('FCM REGISTER: authenticated user=${user.id}');
+      debugPrint('FCM REGISTER: email=${user.email}');
+
       final token = await _messaging.getToken();
+
+      if (token != null && token.isNotEmpty) {
+        debugPrint(
+          'FCM TOKEN DEBUG: ${token.substring(0, token.length > 12 ? 12 : token.length)}...',
+        );
+      }
 
       if (token == null || token.isEmpty) {
         debugPrint('FCM token unavailable.');
@@ -78,14 +84,12 @@ class NotificationService {
             ? 'ios'
             : 'android';
 
-    await _supabase.from('push_tokens').upsert(
-      {
-        'user_id': user.id,
-        'token': token,
-        'platform': platform,
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
+    await _supabase.rpc(
+      'register_push_token',
+      params: {
+        'p_token': token,
+        'p_platform': platform,
       },
-      onConflict: 'token',
     );
   }
 

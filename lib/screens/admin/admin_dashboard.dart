@@ -4,6 +4,7 @@ import '../../models/apartment.dart';
 import '../../models/property.dart';
 import '../../models/landlord.dart';
 import '../../main.dart' show OpenNestStore;
+import '../owner/owner_notifications_page.dart';
 
 class AdminDashboardPage extends StatefulWidget {
   const AdminDashboardPage({
@@ -43,6 +44,24 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   static const Color orange = Color(0xFFF59E0B);
   static const Color purple = Color(0xFF9333EA);
 
+  Future<int> _getUnreadNotificationCount() async {
+    final user = OpenNestStore.supabase.auth.currentUser;
+    if (user == null) return 0;
+
+    try {
+      final response = await OpenNestStore.supabase
+          .from('owner_notifications')
+          .select('id')
+          .eq('owner_id', user.id)
+          .eq('is_read', false);
+
+      return (response as List).length;
+    } catch (e) {
+      debugPrint('OWNER NOTIFICATION COUNT ERROR: $e');
+      return 0;
+    }
+  }
+
   int get occupied => widget.apartments
       .where((a) => a.status.toLowerCase() == 'occupied')
       .length;
@@ -63,10 +82,57 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Notifications',
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {},
+          FutureBuilder<int>(
+            future: _getUnreadNotificationCount(),
+            builder: (context, snapshot) {
+              final count = snapshot.data ?? 0;
+
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    tooltip: 'Notifications',
+                    icon: const Icon(Icons.notifications_outlined),
+                    onPressed: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const OwnerNotificationsPage(),
+                        ),
+                      );
+
+                      if (mounted) {
+                        setState(() {});
+                      }
+                    },
+                  ),
+                  if (count > 0)
+                    Positioned(
+                      right: 7,
+                      top: 7,
+                      child: Container(
+                        constraints: const BoxConstraints(
+                          minWidth: 17,
+                          minHeight: 17,
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          count > 99 ? '99+' : '$count',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ],
       ),

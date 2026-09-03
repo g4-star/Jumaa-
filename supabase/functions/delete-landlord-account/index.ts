@@ -69,9 +69,6 @@ Deno.serve(async (req) => {
 
     // ----------------------------------------------------------
     // 1. ALWAYS TRY EMAIL FIRST.
-    //
-    // Old local IDs such as ONL-1001 and ONL-1002 are not UUIDs.
-    // The email is the reliable identifier for those accounts.
     // ----------------------------------------------------------
 
     if (landlordEmail) {
@@ -103,10 +100,7 @@ Deno.serve(async (req) => {
     }
 
     // ----------------------------------------------------------
-    // 2. ONLY USE landlord_id IF IT IS ACTUALLY A UUID.
-    //
-    // This prevents ONL-1001 / ONL-1002 from ever reaching
-    // the PostgreSQL UUID column.
+    // 2. USE landlord_id ONLY IF IT IS A UUID.
     // ----------------------------------------------------------
 
     if (!landlordUuid && landlordId && isUuid(landlordId)) {
@@ -139,15 +133,13 @@ Deno.serve(async (req) => {
 
     // ----------------------------------------------------------
     // 3. LANDLORD DOES NOT EXIST IN SUPABASE.
-    //
-    // This can happen with old local-only landlord accounts.
-    // Tell Flutter that it is safe to remove the stale local
-    // account.
     // ----------------------------------------------------------
 
     if (!landlordUuid) {
       console.log(
-        `No Supabase landlord found for ${landlordEmail || landlordId}`,
+        `No Supabase landlord found for ${
+          landlordEmail || landlordId
+        }`,
       );
 
       return jsonResponse({
@@ -164,35 +156,65 @@ Deno.serve(async (req) => {
     );
 
     // ----------------------------------------------------------
-    // 4. REMOVE PROPERTY ASSIGNMENT.
+    // 4. CHECK WHETHER THIS LANDLORD IS CURRENTLY ASSIGNED
+    //    TO A PROPERTY.
+    //
+    // IMPORTANT:
+    // properties currently has ONE landlord_id.
+    //
+    // Therefore the owner must assign a replacement landlord
+    // before this landlord can be deleted.
     // ----------------------------------------------------------
 
     const propertyResponse = await fetch(
       `${SUPABASE_URL}/rest/v1/properties?landlord_id=eq.${encodeURIComponent(
         landlordUuid,
-      )}`,
+      )}&select=id,name,owner_id,landlord_id`,
       {
-        method: "PATCH",
-        headers: {
-          ...headers,
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify({
-          landlord_id: null,
-        }),
+        method: "GET",
+        headers,
       },
     );
 
     if (!propertyResponse.ok) {
       throw new Error(
-        `Could not remove landlord property assignment: ${
+        `Could not check landlord property assignment: ${
           await propertyResponse.text()
         }`,
       );
     }
 
+    const properties = await propertyResponse.json();
+
+    if (Array.isArray(properties) && properties.length > 0) {
+      const property = properties[0];
+
+      console.warn(
+        `Deletion blocked: landlord ${landlordUuid} is still assigned to property ${property.id}`,
+      );
+
+      return jsonResponse(
+        {
+          success: false,
+          blocked: true,
+          error:
+            "This landlord is currently managing a property. Assign another landlord to the property before deleting this landlord.",
+          property_id: property.id,
+          property_name: property.name,
+          landlord_id: landlordUuid,
+        },
+        409,
+      );
+    }
+
     // ----------------------------------------------------------
     // 5. DELETE public.landlords.
+    //
+    // The property check above guarantees this landlord is no
+    // longer the current landlord of any property.
+    //
+    // TENANTS ARE NOT DELETED.
+    // They belong to the property/unit, not the landlord.
     // ----------------------------------------------------------
 
     const landlordDeleteResponse = await fetch(
@@ -241,7 +263,7 @@ Deno.serve(async (req) => {
     }
 
     // ----------------------------------------------------------
-    // 7. DELETE Supabase Auth USER.
+    // 7. DELETE SUPABASE AUTH USER.
     // ----------------------------------------------------------
 
     const authDeleteResponse = await fetch(

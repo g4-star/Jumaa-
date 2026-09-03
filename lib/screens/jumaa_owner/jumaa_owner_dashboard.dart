@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'jumaa_owner_notifications_page.dart';
+
 class JumaaOwnerDashboard extends StatefulWidget {
   const JumaaOwnerDashboard({super.key});
 
@@ -361,11 +363,13 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           ),
           _roundButton(Icons.search_rounded, _showSearch),
           const SizedBox(width: 7),
-          _roundButton(
-            Icons.notifications_none_rounded,
-            () => setState(() => _currentIndex = 2),
-            badge: _pendingPayments > 0,
-          ),
+          _roundButton(Icons.notifications_none_rounded, () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const JumaaOwnerNotificationsPage(),
+              ),
+            );
+          }, badge: _pendingPayments > 0),
         ],
       ),
     );
@@ -1693,7 +1697,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     String? reason,
   }) async {
     try {
-      await _supabase
+      final updatedRows = await _supabase
           .from('profiles')
           .update({
             'account_status': newStatus,
@@ -1702,7 +1706,35 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
                 ? DateTime.now().toIso8601String()
                 : null,
           })
-          .eq('id', userId);
+          .eq('id', userId)
+          .eq('role', 'owner')
+          .select(
+            'id,full_name,email,role,account_status,'
+            'suspension_reason,suspended_at',
+          );
+
+      final rows = List<Map<String, dynamic>>.from(updatedRows);
+
+      if (rows.isEmpty) {
+        throw Exception(
+          'No owner profile was updated. Check Supabase RLS permissions.',
+        );
+      }
+
+      final updated = rows.first;
+      final actualStatus = updated['account_status']
+          ?.toString()
+          .toLowerCase()
+          .trim();
+
+      if (actualStatus != newStatus) {
+        throw Exception(
+          'Database returned status "$actualStatus" instead of '
+          '"$newStatus".',
+        );
+      }
+
+      debugPrint('JUMAA OWNER: $name status changed to $actualStatus');
 
       if (!mounted) return;
 
@@ -1718,6 +1750,10 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
 
       await _loadDashboard();
     } catch (e) {
+      debugPrint('JUMAA OWNER STATUS ERROR: $e');
+
+      if (!mounted) return;
+
       _showError('Could not update owner: $e');
     }
   }
@@ -1878,13 +1914,141 @@ class _JumaaOwnerDetailsPageState extends State<_JumaaOwnerDetailsPage> {
       final properties = List<Map<String, dynamic>>.from(rows);
 
       for (final property in properties) {
+        final propertyId = property['id']?.toString();
+
+        if (propertyId == null || propertyId.isEmpty) {
+          property['unit_count'] = 0;
+          property['landlord'] = null;
+          property['tenants'] = <Map<String, dynamic>>[];
+          property['subscription'] = null;
+          property['subscription_payments'] = <Map<String, dynamic>>[];
+          continue;
+        }
+
+        // Load units.
         final units = await widget.supabase
             .from('units')
-            .select('id')
-            .eq('property_id', property['id']);
+            .select('id,unit_number,unit_type,rent,monthly_rent,status')
+            .eq('property_id', propertyId);
 
-        property['unit_count'] = units.length;
+        final unitRows = List<Map<String, dynamic>>.from(units);
 
+        property['unit_count'] = unitRows.length;
+
+        // Load landlord assigned to this property.
+        property['landlord'] = null;
+
+        final landlordId = property['landlord_id']?.toString();
+
+        if (landlordId != null && landlordId.isNotEmpty) {
+          final landlord = await widget.supabase
+              .from('landlords')
+              .select(
+                'id,full_name,email,phone,created_at,updated_at,auth_user_id',
+              )
+              .eq('id', landlordId)
+              .maybeSingle();
+
+          property['landlord'] = landlord;
+        }
+
+        // Load tenant assignments for this property.
+        final assignments = await widget.supabase
+            .from('tenant_assignments')
+            .select(
+              'id,tenant_id,property_id,unit_id,booking_id,'
+              'move_in_date,move_out_date,active,created_at',
+            )
+            .eq('property_id', propertyId)
+            .order('created_at', ascending: false);
+
+        final assignmentRows = List<Map<String, dynamic>>.from(assignments);
+
+        final tenantIds = assignmentRows
+            .map((row) => row['tenant_id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>()
+            .toSet()
+            .toList();
+
+        final unitIds = assignmentRows
+            .map((row) => row['unit_id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>()
+            .toSet()
+            .toList();
+
+        final Map<String, Map<String, dynamic>> tenantMap = {};
+        final Map<String, Map<String, dynamic>> unitMap = {};
+
+        // Load tenant profiles.
+        if (tenantIds.isNotEmpty) {
+          final tenantRows = await widget.supabase
+              .from('profiles')
+              .select(
+                'id,email,full_name,phone,role,created_at,account_status,'
+                'suspension_reason,suspended_at',
+              )
+              .inFilter('id', tenantIds)
+              .eq('role', 'tenant');
+
+          for (final tenant in List<Map<String, dynamic>>.from(tenantRows)) {
+            final id = tenant['id']?.toString();
+
+            if (id != null && id.isNotEmpty) {
+              tenantMap[id] = tenant;
+            }
+          }
+        }
+
+        // Load assigned units.
+        if (unitIds.isNotEmpty) {
+          final assignedUnits = await widget.supabase
+              .from('units')
+              .select('id,unit_number,unit_type,rent,monthly_rent,status')
+              .inFilter('id', unitIds);
+
+          for (final unit in List<Map<String, dynamic>>.from(assignedUnits)) {
+            final id = unit['id']?.toString();
+
+            if (id != null && id.isNotEmpty) {
+              unitMap[id] = unit;
+            }
+          }
+        }
+
+        final tenants = <Map<String, dynamic>>[];
+
+        for (final assignment in assignmentRows) {
+          final tenantId = assignment['tenant_id']?.toString();
+          final unitId = assignment['unit_id']?.toString();
+
+          final tenant = tenantId == null ? null : tenantMap[tenantId];
+          final unit = unitId == null ? null : unitMap[unitId];
+
+          if (tenant == null) {
+            continue;
+          }
+
+          tenants.add({
+            ...tenant,
+            'assignment_id': assignment['id'],
+            'property_id': propertyId,
+            'unit_id': unitId,
+            'unit_number': unit?['unit_number'],
+            'unit_type': unit?['unit_type'],
+            'unit_rent': unit?['rent'] ?? unit?['monthly_rent'],
+            'assignment_active': assignment['active'],
+            'move_in_date': assignment['move_in_date'],
+            'move_out_date': assignment['move_out_date'],
+            'booking_id': assignment['booking_id'],
+            'assigned_at': assignment['created_at'],
+          });
+        }
+
+        property['tenants'] = tenants;
+
+        // Load subscription.
         final subscription = await widget.supabase
             .from('subscriptions')
             .select(
@@ -1892,10 +2056,25 @@ class _JumaaOwnerDetailsPageState extends State<_JumaaOwnerDetailsPage> {
               'trial_ends_at,subscription_starts_at,'
               'subscription_ends_at,credit_amount',
             )
-            .eq('property_id', property['id'])
+            .eq('property_id', propertyId)
             .maybeSingle();
 
         property['subscription'] = subscription;
+
+        // Load subscription payment history for this property.
+        final paymentRows = await widget.supabase
+            .from('subscription_payments')
+            .select(
+              'id,owner_id,property_id,amount,monthly_rate,units_count,'
+              'months_covered,credit_generated,payment_method,reference,'
+              'status,paid_at,created_at',
+            )
+            .eq('property_id', propertyId)
+            .order('created_at', ascending: false);
+
+        property['subscription_payments'] = List<Map<String, dynamic>>.from(
+          paymentRows,
+        );
       }
 
       if (!mounted) return;
@@ -2126,6 +2305,16 @@ class _JumaaOwnerDetailsPageState extends State<_JumaaOwnerDetailsPage> {
   Widget _propertyCard(Map<String, dynamic> property) {
     final subscription = property['subscription'] as Map<String, dynamic>?;
 
+    final landlord = property['landlord'] as Map<String, dynamic>?;
+
+    final tenants = List<Map<String, dynamic>>.from(
+      property['tenants'] ?? const [],
+    );
+
+    final payments = List<Map<String, dynamic>>.from(
+      property['subscription_payments'] ?? const [],
+    );
+
     final unitCount = (property['unit_count'] as int?) ?? 0;
 
     final monthlyAmount = subscription?['monthly_amount'];
@@ -2141,6 +2330,90 @@ class _JumaaOwnerDetailsPageState extends State<_JumaaOwnerDetailsPage> {
     ].where((value) => value != null && value.trim().isNotEmpty);
 
     final location = locationParts.join(', ');
+
+    String formatDate(dynamic value) {
+      if (value == null || value.toString().trim().isEmpty) {
+        return 'Not available';
+      }
+
+      final parsed = DateTime.tryParse(value.toString());
+
+      if (parsed == null) {
+        return value.toString();
+      }
+
+      return '${parsed.day.toString().padLeft(2, '0')}/'
+          '${parsed.month.toString().padLeft(2, '0')}/'
+          '${parsed.year}';
+    }
+
+    Widget sectionHeader(IconData icon, String title, Color color, int count) {
+      return Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: .10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 19),
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: .10),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              '$count',
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget smallInfo(String title, String value) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 7),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 92,
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -2159,6 +2432,7 @@ class _JumaaOwnerDetailsPageState extends State<_JumaaOwnerDetailsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // PROPERTY HEADER
           Row(
             children: [
               CircleAvatar(
@@ -2180,7 +2454,9 @@ class _JumaaOwnerDetailsPageState extends State<_JumaaOwnerDetailsPage> {
               ),
             ],
           ),
+
           const SizedBox(height: 14),
+
           if (location.isNotEmpty)
             _infoCard(
               icon: Icons.location_on_rounded,
@@ -2188,29 +2464,391 @@ class _JumaaOwnerDetailsPageState extends State<_JumaaOwnerDetailsPage> {
               title: 'Location',
               value: location,
             ),
+
           const SizedBox(height: 8),
+
           _infoCard(
             icon: Icons.meeting_room_rounded,
             color: const Color(0xFF2563EB),
             title: 'Units',
             value: '$unitCount units',
           ),
-          const SizedBox(height: 8),
+
+          // LANDLORD
+          const SizedBox(height: 18),
+          sectionHeader(
+            Icons.badge_rounded,
+            'Landlord',
+            const Color(0xFF7C3AED),
+            landlord == null ? 0 : 1,
+          ),
+          const SizedBox(height: 9),
+
+          if (landlord == null)
+            _infoCard(
+              icon: Icons.person_off_rounded,
+              color: Colors.grey,
+              title: 'Landlord',
+              value: 'No landlord assigned',
+            )
+          else
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: const Color(0xFF7C3AED).withValues(alpha: .055),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: const Color(0xFF7C3AED).withValues(alpha: .10),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    landlord['full_name']?.toString().trim().isNotEmpty == true
+                        ? landlord['full_name'].toString()
+                        : 'Landlord',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 9),
+                  if (landlord['email'] != null &&
+                      landlord['email'].toString().trim().isNotEmpty)
+                    smallInfo('Email', landlord['email'].toString()),
+                  if (landlord['phone'] != null &&
+                      landlord['phone'].toString().trim().isNotEmpty)
+                    smallInfo('Phone', landlord['phone'].toString()),
+                  smallInfo('Created', formatDate(landlord['created_at'])),
+                ],
+              ),
+            ),
+
+          // TENANTS
+          const SizedBox(height: 18),
+          sectionHeader(
+            Icons.groups_rounded,
+            'Tenants',
+            const Color(0xFF059669),
+            tenants.length,
+          ),
+          const SizedBox(height: 9),
+
+          if (tenants.isEmpty)
+            _infoCard(
+              icon: Icons.person_off_rounded,
+              color: Colors.grey,
+              title: 'Tenants',
+              value: 'No tenants currently assigned',
+            )
+          else
+            ...tenants.map((tenant) {
+              final tenantName =
+                  tenant['full_name']?.toString().trim().isNotEmpty == true
+                  ? tenant['full_name'].toString()
+                  : tenant['email']?.toString() ?? 'Tenant';
+
+              final accountStatus =
+                  tenant['account_status']?.toString().toLowerCase() ??
+                  'active';
+
+              final assignmentActive = tenant['assignment_active'] == true;
+
+              final statusText = !assignmentActive
+                  ? 'Inactive assignment'
+                  : accountStatus == 'suspended'
+                  ? 'Account suspended'
+                  : 'Active';
+
+              final statusColor = !assignmentActive
+                  ? Colors.grey
+                  : accountStatus == 'suspended'
+                  ? Colors.red
+                  : Colors.green;
+
+              final unitNumber = tenant['unit_number']?.toString().trim();
+
+              return Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(13),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF059669).withValues(alpha: .045),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: const Color(0xFF059669).withValues(alpha: .10),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CircleAvatar(
+                      radius: 20,
+                      backgroundColor: const Color(0xFF059669)
+                          .withValues(alpha: .12),
+                      child: Text(
+                        tenantName.isNotEmpty
+                            ? tenantName[0].toUpperCase()
+                            : 'T',
+                        style: const TextStyle(
+                          color: Color(0xFF059669),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            tenantName,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          if (tenant['email'] != null &&
+                              tenant['email'].toString().trim().isNotEmpty)
+                            Text(
+                              tenant['email'].toString(),
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 10,
+                              ),
+                            ),
+                          if (tenant['phone'] != null &&
+                              tenant['phone'].toString().trim().isNotEmpty)
+                            Text(
+                              tenant['phone'].toString(),
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 10,
+                              ),
+                            ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 5,
+                            children: [
+                              if (unitNumber != null && unitNumber.isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withValues(alpha: .08),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    'Unit $unitNumber',
+                                    style: const TextStyle(
+                                      color: Color(0xFF2563EB),
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: statusColor.withValues(alpha: .09),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  statusText,
+                                  style: TextStyle(
+                                    color: statusColor,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 7),
+                          smallInfo(
+                            'Move in',
+                            formatDate(tenant['move_in_date']),
+                          ),
+                          if (tenant['move_out_date'] != null)
+                            smallInfo(
+                              'Move out',
+                              formatDate(tenant['move_out_date']),
+                            ),
+                          smallInfo('Rent', _money(tenant['unit_rent'])),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+
+          // SUBSCRIPTION
+          const SizedBox(height: 18),
+          sectionHeader(
+            Icons.card_membership_rounded,
+            'JUMAA Subscription',
+            Colors.orange,
+            subscription == null ? 0 : 1,
+          ),
+          const SizedBox(height: 9),
+
           _infoCard(
             icon: Icons.payments_rounded,
             color: const Color(0xFF059669),
-            title: 'JUMAA monthly subscription',
+            title: 'Monthly subscription',
             value: monthlyAmount == null
                 ? 'Not configured'
                 : _money(monthlyAmount),
           ),
+
           const SizedBox(height: 8),
+
           _infoCard(
             icon: Icons.verified_rounded,
             color: Colors.orange,
             title: 'Subscription status',
             value: subscriptionStatus.toUpperCase(),
           ),
+
+          if (subscription != null) ...[
+            const SizedBox(height: 8),
+            _infoCard(
+              icon: Icons.event_available_rounded,
+              color: const Color(0xFF2563EB),
+              title: 'Subscription starts',
+              value: formatDate(subscription['subscription_starts_at']),
+            ),
+            const SizedBox(height: 8),
+            _infoCard(
+              icon: Icons.event_busy_rounded,
+              color: Colors.red,
+              title: 'Subscription ends',
+              value: formatDate(subscription['subscription_ends_at']),
+            ),
+            const SizedBox(height: 8),
+            _infoCard(
+              icon: Icons.card_giftcard_rounded,
+              color: const Color(0xFF7C3AED),
+              title: 'Credit',
+              value: _money(subscription['credit_amount']),
+            ),
+          ],
+
+          // PAYMENT HISTORY
+          const SizedBox(height: 18),
+          sectionHeader(
+            Icons.receipt_long_rounded,
+            'Subscription Payment History',
+            const Color(0xFF2563EB),
+            payments.length,
+          ),
+          const SizedBox(height: 9),
+
+          if (payments.isEmpty)
+            _infoCard(
+              icon: Icons.receipt_long_rounded,
+              color: Colors.grey,
+              title: 'Payments',
+              value: 'No subscription payments recorded',
+            )
+          else
+            ...payments.map((payment) {
+              final status = payment['status']?.toString().trim() ?? 'unknown';
+
+              final normalizedStatus = status.toLowerCase();
+
+              final statusColor = normalizedStatus == 'successful'
+                  ? Colors.green
+                  : normalizedStatus == 'pending'
+                  ? Colors.orange
+                  : Colors.red;
+
+              return Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(13),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: .035),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.blue.withValues(alpha: .08)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.receipt_rounded,
+                          color: Color(0xFF2563EB),
+                          size: 19,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _money(payment['amount']),
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: .10),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            status.toUpperCase(),
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 9),
+                    smallInfo(
+                      'Reference',
+                      payment['reference']?.toString().trim().isNotEmpty == true
+                          ? payment['reference'].toString()
+                          : 'Not available',
+                    ),
+                    smallInfo(
+                      'Method',
+                      payment['payment_method']?.toString() ?? 'Not available',
+                    ),
+                    smallInfo(
+                      'Units',
+                      payment['units_count']?.toString() ?? 'Not available',
+                    ),
+                    smallInfo(
+                      'Months',
+                      payment['months_covered']?.toString() ?? 'Not available',
+                    ),
+                    smallInfo(
+                      'Paid',
+                      formatDate(payment['paid_at'] ?? payment['created_at']),
+                    ),
+                  ],
+                ),
+              );
+            }),
         ],
       ),
     );

@@ -11,7 +11,6 @@ import 'landlord_tenants_page.dart';
 import 'landlord_messages_page.dart';
 import 'landlord_payments_page.dart';
 import 'landlord_notifications_page.dart';
-import 'landlord_announcements_page.dart';
 import 'landlord_settings_page.dart';
 
 class LandlordDashboardPage extends StatefulWidget {
@@ -190,8 +189,27 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
   void _openPage(int index) {
     debugPrint('LANDLORD NAV DEBUG: _openPage called with index=$index');
 
+    // Landlords can access the dashboard only.
+    if (index != 0) {
+      debugPrint('LANDLORD NAV LOCK: blocked navigation to index=$index');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This page is currently unavailable. '
+            'Only your dashboard is accessible.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      return;
+    }
+
     setState(() {
-      _currentIndex = index;
+      _currentIndex = 0;
     });
 
     debugPrint('LANDLORD NAV DEBUG: currentIndex changed to $_currentIndex');
@@ -547,11 +565,13 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
         Icons.campaign_outlined,
         const Color(0xFF7C3AED),
         () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) =>
-                  LandlordAnnouncementsPage(landlord: widget.landlord),
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'News is currently unavailable. '
+                'Only your dashboard is accessible.',
+              ),
+              behavior: SnackBarBehavior.floating,
             ),
           );
         },
