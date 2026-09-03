@@ -9930,14 +9930,16 @@ class _LandlordLoginPageState extends State<LandlordLoginPage> {
         throw const AuthException('Login failed.');
       }
 
+      
+    
+      // ============================================================
       // Register this landlord's phone for JUMAA push notifications.
       try {
         await NotificationService.instance.registerCurrentDevice();
       } catch (e) {
         debugPrint('LANDLORD LOGIN: Push token registration failed: $e');
       }
-
-      final landlord = await OpenNestStore.loadLandlordProfile();
+final landlord = await OpenNestStore.loadLandlordProfile();
 
       if (!mounted) return;
 
@@ -14807,6 +14809,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
     super.dispose();
   }
 
+
   Future<void> _login() async {
     final email = _emailController.text.trim().toLowerCase();
     final password = _passwordController.text.trim();
@@ -14837,9 +14840,12 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
         throw Exception('Supabase did not return a user.');
       }
 
-      // Register this phone for JUMAA push notifications.
-      // This is intentionally done once after authentication,
-      // before role-specific routing.
+      
+    
+    // ============================================================
+
+      // FCM REGISTRATION
+      // Only happens after password authentication succeeds.
       try {
         await NotificationService.instance.registerCurrentDevice();
       } catch (e) {
