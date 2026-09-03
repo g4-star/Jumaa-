@@ -25,6 +25,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
   int _units = 0;
   int _payments = 0;
   int _pendingPayments = 0;
+  double _revenue = 0.0;
 
   List<Map<String, dynamic>> _recentActivity = [];
 
@@ -167,8 +168,7 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
             .select(
               'id,owner_id,property_id,amount,status,reference,created_at',
             )
-            .order('created_at', ascending: false)
-            .limit(50);
+            .order('created_at', ascending: false);
 
         final payments = List<Map<String, dynamic>>.from(rows);
 
@@ -177,16 +177,31 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
               'pending';
         }).length;
 
+        final revenue = payments
+            .where((payment) {
+              final status = payment['status']?.toString().toLowerCase().trim();
+              return status == 'successful';
+            })
+            .fold<double>(
+              0.0,
+              (total, payment) =>
+                  total +
+                  (double.tryParse(payment['amount']?.toString() ?? '0') ??
+                      0.0),
+            );
+
         if (mounted) {
           setState(() {
             _payments = payments.length;
             _pendingPayments = pending;
+            _revenue = revenue;
           });
         }
 
         debugPrint(
           'JUMAA OWNER: payments=$_payments '
-          'pending=$_pendingPayments',
+          'pending=$_pendingPayments '
+          'revenue=$_revenue',
         );
       } catch (e) {
         debugPrint('JUMAA OWNER: subscription payments query failed: $e');
@@ -451,7 +466,12 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
           const SizedBox(width: 7),
           _statCard('Users', '$_users', Icons.people_alt_rounded, _blue),
           const SizedBox(width: 7),
-          _statCard('Revenue', 'KSh 0.00', Icons.payments_rounded, _green),
+          _statCard(
+            'Revenue',
+            'KSh ${_revenue.toStringAsFixed(2)}',
+            Icons.payments_rounded,
+            _green,
+          ),
         ],
       ),
     );
