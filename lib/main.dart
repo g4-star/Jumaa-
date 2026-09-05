@@ -3630,6 +3630,7 @@ class _OwnerUnitsManagementPageState extends State<OwnerUnitsManagementPage> {
       ),
 
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'manage_units_add_unit',
         onPressed: _addUnit,
         icon: const Icon(Icons.add),
         label: const Text('Add Unit'),
@@ -5933,6 +5934,7 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
     final available = availableUnits(property);
     final images = propertyImages(property.id);
 
+
     final primary = Theme.of(context).colorScheme.primary;
     final surface = Theme.of(context).colorScheme.surface;
 
@@ -6117,32 +6119,9 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
       return _propertyPlaceholder();
     }
 
-    final imagePath = images.first;
-
-    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
-      return SizedBox(
-        height: 118,
-        width: 105,
-        child: Image.network(
-          imagePath,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) {
-            return _propertyPlaceholder();
-          },
-        ),
-      );
-    }
-
-    return SizedBox(
-      height: 118,
-      width: 105,
-      child: Image.file(
-        File(imagePath),
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) {
-          return _propertyPlaceholder();
-        },
-      ),
+    return _PropertyImageCarousel(
+      images: images,
+      placeholder: _propertyPlaceholder(),
     );
   }
 
@@ -7225,21 +7204,6 @@ class OpenNestStore {
         .from('properties')
         .select()
         .order('created_at', ascending: false);
-
-    debugPrint(
-      'MARKETPLACE DEBUG: properties response count = ${response.length}',
-    );
-    for (final row in response) {
-      debugPrint(
-        'MARKETPLACE PROPERTY: '
-        'id=${row['id']} '
-        'name=${row['name']} '
-        'county=${row['county']} '
-        'subcounty=${row['subcounty']} '
-        'location=${row['location']}',
-      );
-    }
-
     // Only replace local data when Supabase actually returned records.
     // This keeps the app usable if the database is empty.
     if (response.isEmpty) {
@@ -7318,19 +7282,6 @@ class OpenNestStore {
         .select()
         .order('created_at', ascending: false);
 
-    debugPrint('MARKETPLACE DEBUG: units response count = ${response.length}');
-    for (final row in response) {
-      debugPrint(
-        'MARKETPLACE UNIT: '
-        'id=${row['id']} '
-        'unit=${row['unit_number']} '
-        'property_id=${row['property_id']} '
-        'type=${row['unit_type']} '
-        'rent=${row['monthly_rent']} '
-        'status=${row['status']}',
-      );
-    }
-
     // Keep local/sample units when the Supabase table is empty.
     if (response.isEmpty) {
       debugPrint('Supabase: no units found. Keeping local data.');
@@ -7383,8 +7334,12 @@ class OpenNestStore {
   }
 
   static Future<void> loadMarketplaceDataFromSupabase() async {
+// Properties must load first because units use property information
+    // such as property name and location.
     await loadPropertiesFromSupabase();
+// Load units only after properties are available.
     await loadUnitsFromSupabase();
+
   }
 
   // ============================================================
@@ -8736,6 +8691,7 @@ class _TenantNotificationsPageState extends State<TenantNotificationsPage> {
       ),
 
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'notifications_add',
         onPressed: _createNotification,
         icon: const Icon(Icons.add),
         label: const Text('Add Notification'),
@@ -9175,6 +9131,7 @@ class _TenantsPageState extends State<TenantsPage> {
       ),
 
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'tenants_add',
         onPressed: _showAddTenantDialog,
         icon: const Icon(Icons.person_add),
         label: const Text('Add Tenant'),
@@ -9930,8 +9887,6 @@ class _LandlordLoginPageState extends State<LandlordLoginPage> {
         throw const AuthException('Login failed.');
       }
 
-      
-    
       // ============================================================
       // Register this landlord's phone for JUMAA push notifications.
       try {
@@ -9939,7 +9894,7 @@ class _LandlordLoginPageState extends State<LandlordLoginPage> {
       } catch (e) {
         debugPrint('LANDLORD LOGIN: Push token registration failed: $e');
       }
-final landlord = await OpenNestStore.loadLandlordProfile();
+      final landlord = await OpenNestStore.loadLandlordProfile();
 
       if (!mounted) return;
 
@@ -11077,6 +11032,7 @@ class _LandlordsPageState extends State<LandlordsPage> {
               },
             ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'landlords_add',
         onPressed: _showAddLandlordDialog,
         icon: const Icon(Icons.person_add),
         label: const Text('Add Landlord'),
@@ -14378,6 +14334,130 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
 // JUMAA - PUBLIC USER / APARTMENT SEARCH
 // ============================================================
 
+class _PropertyImageCarousel extends StatefulWidget {
+  final List<String> images;
+  final Widget placeholder;
+
+  const _PropertyImageCarousel({
+    required this.images,
+    required this.placeholder,
+  });
+
+  @override
+  State<_PropertyImageCarousel> createState() => _PropertyImageCarouselState();
+}
+
+class _PropertyImageCarouselState extends State<_PropertyImageCarousel> {
+  late final PageController _pageController;
+  Timer? _imageTimer;
+  int _currentPage = 0;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _pageController = PageController();
+
+    if (widget.images.length > 1) {
+      _imageTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        if (!mounted || !_pageController.hasClients) return;
+
+        final nextPage = _currentPage + 1;
+
+        _pageController.animateToPage(
+          nextPage >= widget.images.length ? 0 : nextPage,
+          duration: const Duration(milliseconds: 600),
+          curve: Curves.easeInOut,
+        );
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _imageTimer?.cancel();
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  Widget _buildImage(String imagePath) {
+    final isNetworkImage =
+        imagePath.startsWith('http://') || imagePath.startsWith('https://');
+
+    if (isNetworkImage) {
+      return Image.network(
+        imagePath,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        errorBuilder: (_, _, _) => widget.placeholder,
+      );
+    }
+
+    return Image.file(
+      File(imagePath),
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: double.infinity,
+      errorBuilder: (_, _, _) => widget.placeholder,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 118,
+      width: 105,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(0),
+        child: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              itemCount: widget.images.length,
+              onPageChanged: (index) {
+                if (mounted) {
+                  setState(() {
+                    _currentPage = index;
+                  });
+                }
+              },
+              itemBuilder: (context, index) {
+                return _buildImage(widget.images[index]);
+              },
+            ),
+            if (widget.images.length > 1)
+              Positioned(
+                bottom: 5,
+                left: 0,
+                right: 0,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(widget.images.length, (index) {
+                    final isActive = index == _currentPage;
+
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      width: isActive ? 7 : 5,
+                      height: isActive ? 7 : 5,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isActive
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.55),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class PublicUserPage extends StatefulWidget {
   const PublicUserPage({super.key});
 
@@ -14404,17 +14484,16 @@ class _PublicUserPageState extends State<PublicUserPage> {
       });
     });
 
-    _loadApartments();
+    // Open the marketplace immediately.
+    // If data is already cached in memory, show it without waiting.
+    _loadingApartments =
+        OpenNestStore.apartments.isEmpty && OpenNestStore.properties.isEmpty;
+
+    // Refresh marketplace data in the background.
+    _loadApartmentsInBackground();
   }
 
-  Future<void> _loadApartments() async {
-    if (mounted) {
-      setState(() {
-        _loadingApartments = true;
-        _loadError = null;
-      });
-    }
-
+  Future<void> _loadApartmentsInBackground() async {
     try {
       await OpenNestStore.loadMarketplaceDataFromSupabase();
 
@@ -14422,13 +14501,9 @@ class _PublicUserPageState extends State<PublicUserPage> {
 
       setState(() {
         _loadingApartments = false;
+        _loadError = null;
       });
 
-      debugPrint(
-        'PUBLIC FIND APARTMENT: '
-        '${OpenNestStore.properties.length} properties, '
-        '${OpenNestStore.apartments.length} units loaded.',
-      );
     } catch (e) {
       debugPrint('PUBLIC FIND APARTMENT LOAD ERROR: $e');
 
@@ -14436,7 +14511,11 @@ class _PublicUserPageState extends State<PublicUserPage> {
 
       setState(() {
         _loadingApartments = false;
-        _loadError = 'Could not load apartments.';
+
+        // Only show an error if we have no marketplace data at all.
+        if (OpenNestStore.apartments.isEmpty) {
+          _loadError = 'Could not load apartments.';
+        }
       });
     }
   }
@@ -14448,6 +14527,17 @@ class _PublicUserPageState extends State<PublicUserPage> {
   }
 
   List<Apartment> get _apartments {
+
+    for (final unit in OpenNestStore.apartments) {
+      debugPrint(
+        'PUBLIC FILTER UNIT: '
+        'number=${unit.number} '
+        'propertyId=${unit.propertyId} '
+        'property=${unit.propertyName} '
+        'status=${unit.status}',
+      );
+    }
+
     final results = OpenNestStore.apartments.where((apartment) {
       // Only vacant units are publicly available.
       if (apartment.status.toLowerCase() != 'vacant') {
@@ -14573,7 +14663,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                             ),
                             const SizedBox(height: 16),
                             ElevatedButton.icon(
-                              onPressed: _loadApartments,
+                              onPressed: _loadApartmentsInBackground,
                               icon: const Icon(Icons.refresh),
                               label: const Text('Retry'),
                               style: ElevatedButton.styleFrom(
@@ -14809,7 +14899,6 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
     super.dispose();
   }
 
-
   Future<void> _login() async {
     final email = _emailController.text.trim().toLowerCase();
     final password = _passwordController.text.trim();
@@ -14840,9 +14929,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
         throw Exception('Supabase did not return a user.');
       }
 
-      
-    
-    // ============================================================
+      // ============================================================
 
       // FCM REGISTRATION
       // Only happens after password authentication succeeds.
