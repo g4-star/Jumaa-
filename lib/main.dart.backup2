@@ -3630,7 +3630,6 @@ class _OwnerUnitsManagementPageState extends State<OwnerUnitsManagementPage> {
       ),
 
       floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'manage_units_add_unit',
         onPressed: _addUnit,
         icon: const Icon(Icons.add),
         label: const Text('Add Unit'),
@@ -4226,47 +4225,25 @@ class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
 
                   const SizedBox(height: 30),
 
-                  // LOCATION + BOOKING ACTIONS
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _showPropertyLocation,
-                          icon: const Icon(Icons.location_on_rounded),
-                          label: const Text(
-                            'SEE LOCATION',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
+                  // BOOKING ACTION
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: availableUnits.isEmpty
+                          ? null
+                          : _openBookingForm,
+                      icon: const Icon(Icons.calendar_month_rounded),
+                      label: const Text(
+                        'BOOK NOW',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-
-                      const SizedBox(width: 12),
-
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: availableUnits.isEmpty
-                              ? null
-                              : _openBookingForm,
-                          icon: const Icon(Icons.calendar_month_rounded),
-                          label: const Text(
-                            'BOOK NOW',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
@@ -4510,274 +4487,6 @@ class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
 
   void _openBookingForm() {
     _showBookingDialog();
-  }
-
-  Future<void> _showPropertyLocation() async {
-    final property = widget.property;
-    final latitude = property.latitude;
-    final longitude = property.longitude;
-
-    if (latitude == null || longitude == null) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This property does not have a GPS location yet.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
-    try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-
-      if (!serviceEnabled) {
-        if (!mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Please turn on Location/GPS to find the route to this apartment.',
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.denied) {
-        if (!mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Location permission was denied.'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        return;
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        if (!mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Location permission is permanently denied. Enable it in app settings.',
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        return;
-      }
-
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
-
-      // Calculate straight-line distance only for the quick preview.
-      // The actual road route and travel time are calculated by Google Maps.
-      final distanceMeters = Geolocator.distanceBetween(
-        position.latitude,
-        position.longitude,
-        latitude,
-        longitude,
-      );
-
-      final distanceText = distanceMeters >= 1000
-          ? '${(distanceMeters / 1000).toStringAsFixed(1)} km'
-          : '${distanceMeters.round()} m';
-
-      if (!mounted) return;
-
-      await showModalBottomSheet<void>(
-        context: context,
-        backgroundColor: Colors.transparent,
-        builder: (sheetContext) {
-          return Container(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-            ),
-            child: SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary
-                              .withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.location_on_rounded,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text(
-                          'Your Route',
-                          style: TextStyle(
-                            fontSize: 21,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(sheetContext),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  Text(
-                    property.name,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-
-                  const SizedBox(height: 6),
-
-                  Text(
-                    '${property.location}, ${property.subcounty}, ${property.county}',
-                    style: const TextStyle(color: Colors.black54, fontSize: 14),
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.my_location_rounded),
-                            const SizedBox(width: 12),
-                            const Expanded(
-                              child: Text(
-                                'Your current location',
-                                style: TextStyle(fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                            const Icon(Icons.arrow_forward_rounded, size: 20),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.home_rounded),
-                          ],
-                        ),
-
-                        const SizedBox(height: 14),
-
-                        Row(
-                          children: [
-                            const Icon(Icons.straighten_rounded),
-                            const SizedBox(width: 12),
-                            const Text(
-                              'Approx. distance',
-                              style: TextStyle(color: Colors.black54),
-                            ),
-                            const Spacer(),
-                            Text(
-                              distanceText,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  const Text(
-                    'Google Maps will calculate the actual road route, '
-                    'driving distance and travel time from your current '
-                    'location to this apartment.',
-                    style: TextStyle(color: Colors.black54, fontSize: 13),
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: () async {
-                        final mapsUrl = Uri.parse(
-                          'https://www.google.com/maps/dir/?api=1'
-                          '&origin=${position.latitude},${position.longitude}'
-                          '&destination=$latitude,$longitude'
-                          '&travelmode=driving',
-                        );
-
-                        final launched = await launchUrl(
-                          mapsUrl,
-                          mode: LaunchMode.externalApplication,
-                        );
-
-                        if (!launched && sheetContext.mounted) {
-                          ScaffoldMessenger.of(sheetContext).showSnackBar(
-                            const SnackBar(
-                              content: Text('Could not open Google Maps.'),
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        }
-                      },
-                      icon: const Icon(Icons.directions_rounded),
-                      label: const Text(
-                        'SHOW ROUTE TO APARTMENT',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not determine your location: $e'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
   }
 
   void _showBookingDialog() {
@@ -6224,6 +5933,13 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
     final available = availableUnits(property);
     final images = propertyImages(property.id);
 
+    debugPrint(
+      'FIND APARTMENTS CARD: '
+      'property=${property.name} '
+      'images=${images.length} '
+      'paths=$images',
+    );
+
     final primary = Theme.of(context).colorScheme.primary;
     final surface = Theme.of(context).colorScheme.surface;
 
@@ -7458,6 +7174,7 @@ class OpenNestStore {
 
   // Prevent multiple pages from loading the same data simultaneously.
   static Future<void>? _propertiesLoadRequest;
+  static Future<void>? _unitsLoadRequest;
 
   static double? _toDouble(dynamic value) {
     if (value == null) return null;
@@ -7488,39 +7205,50 @@ class OpenNestStore {
   }
 
   static Future<void> _loadPropertiesFromSupabaseInternal() async {
-    // Marketplace data is loaded through a SECURITY DEFINER RPC that
-    // exposes only fields safe for public apartment discovery.
-    //
-    // Do NOT query the private properties/units tables directly here.
-    final response = await supabase.rpc('get_public_marketplace');
+    final response = await supabase
+        .from('properties')
+        .select()
+        .order('created_at', ascending: false);
 
+    debugPrint(
+      'MARKETPLACE DEBUG: properties response count = ${response.length}',
+    );
+    for (final row in response) {
+      debugPrint(
+        'MARKETPLACE PROPERTY IMAGES: '
+        'id=${row['id']} '
+        'raw=${row['image_paths']} '
+        'type=${row['image_paths']?.runtimeType}',
+      );
+
+      debugPrint(
+        'MARKETPLACE PROPERTY: '
+        'id=${row['id']} '
+        'name=${row['name']} '
+        'county=${row['county']} '
+        'subcounty=${row['subcounty']} '
+        'location=${row['location']}',
+      );
+    }
+
+    // Only replace local data when Supabase actually returned records.
+    // This keeps the app usable if the database is empty.
     if (response.isEmpty) {
-      debugPrint('Supabase: no public marketplace listings found.');
-      properties.clear();
-      apartments.clear();
+      debugPrint('Supabase: no properties found. Keeping local data.');
       return;
     }
 
-    final propertyMap = <String, Property>{};
-    final loadedApartments = <Apartment>[];
+    final loadedProperties = <Property>[];
 
-    for (final rawRow in response) {
-      final row = Map<String, dynamic>.from(rawRow as Map);
-
-      final propertyId = row['property_id']?.toString() ?? '';
-
-      if (propertyId.isEmpty) {
-        continue;
-      }
-
-      // Build each property only once.
-      propertyMap.putIfAbsent(
-        propertyId,
-        () => Property(
-          id: propertyId,
-          // ownerId is intentionally NOT loaded by the marketplace RPC.
-          ownerId: '',
-          name: row['property_name']?.toString() ?? '',
+    for (final row in response) {
+      loadedProperties.add(
+        Property(
+          id: row['id']?.toString() ?? '',
+          ownerId:
+              row['owner_id']?.toString() ??
+              row['landlord_id']?.toString() ??
+              '',
+          name: row['name']?.toString() ?? '',
           county: row['county']?.toString() ?? '',
           subcounty: row['subcounty']?.toString() ?? '',
           location: row['location']?.toString() ?? '',
@@ -7528,6 +7256,13 @@ class OpenNestStore {
           latitude: _toDouble(row['latitude']),
           longitude: _toDouble(row['longitude']),
           description: row['description']?.toString() ?? '',
+          email: row['email']?.toString() ?? '',
+          phone: row['phone']?.toString() ?? '',
+          paymentMethod: row['payment_method']?.toString() ?? 'till',
+          mpesaTillNumber: row['mpesa_till_number']?.toString() ?? '',
+          mpesaPaybillNumber: row['mpesa_paybill_number']?.toString() ?? '',
+          mpesaAccountNumber: row['mpesa_account_number']?.toString() ?? '',
+          paymentsEnabled: row['payments_enabled'] == true,
           imagePaths: row['image_paths'] is List
               ? List<String>.from(
                   (row['image_paths'] as List)
@@ -7537,59 +7272,119 @@ class OpenNestStore {
               : const [],
         ),
       );
+    }
 
-      final unitId = row['unit_id']?.toString() ?? '';
+    properties
+      ..clear()
+      ..addAll(loadedProperties);
 
-      if (unitId.isEmpty) {
-        continue;
+    debugPrint('Supabase: loaded ${properties.length} properties.');
+  }
+
+  // ============================================================
+  // LOAD UNITS FROM SUPABASE
+  // ============================================================
+
+  static Future<void> loadUnitsFromSupabase() async {
+    if (_unitsLoadRequest != null) {
+      await _unitsLoadRequest;
+      return;
+    }
+
+    final request = _loadUnitsFromSupabaseInternal();
+    _unitsLoadRequest = request;
+
+    try {
+      await request;
+    } finally {
+      if (identical(_unitsLoadRequest, request)) {
+        _unitsLoadRequest = null;
       }
+    }
+  }
+
+  static Future<void> _loadUnitsFromSupabaseInternal() async {
+    final response = await supabase
+        .from('units')
+        .select()
+        .order('created_at', ascending: false);
+
+    debugPrint('MARKETPLACE DEBUG: units response count = ${response.length}');
+    for (final row in response) {
+      debugPrint(
+        'MARKETPLACE UNIT: '
+        'id=${row['id']} '
+        'unit=${row['unit_number']} '
+        'property_id=${row['property_id']} '
+        'type=${row['unit_type']} '
+        'rent=${row['monthly_rent']} '
+        'status=${row['status']}',
+      );
+    }
+
+    // Keep local/sample units when the Supabase table is empty.
+    if (response.isEmpty) {
+      debugPrint('Supabase: no units found. Keeping local data.');
+      return;
+    }
+
+    final loadedApartments = <Apartment>[];
+
+    for (final row in response) {
+      final rent = row['monthly_rent'];
 
       loadedApartments.add(
         Apartment(
-          id: unitId,
+          id: row['id']?.toString() ?? '',
           number: row['unit_number']?.toString() ?? '',
           type: row['unit_type']?.toString() ?? '',
-          rent: row['monthly_rent']?.toString() ?? '0',
+          rent: rent?.toString() ?? '0',
           tenant: '',
           status: _normalizeUnitStatus(row['status']?.toString() ?? 'vacant'),
-          propertyId: propertyId,
-          propertyName: row['property_name']?.toString() ?? '',
-          location: row['location']?.toString() ?? '',
+          propertyId: row['property_id']?.toString() ?? '',
+          propertyName: '',
+          location: '',
           description: row['description']?.toString() ?? '',
         ),
       );
     }
 
-    properties
-      ..clear()
-      ..addAll(propertyMap.values);
-
     apartments
       ..clear()
       ..addAll(loadedApartments);
 
-    debugPrint(
-      'Supabase: secure marketplace loaded '
-      '${properties.length} properties and '
-      '${apartments.length} vacant units.',
-    );
-  }
+    // Synchronize property information onto units.
+    for (final unit in apartments) {
+      Property? property;
 
-  static Future<void> loadUnitsFromSupabase() async {
-    // Marketplace units are loaded together with their property through
-    // get_public_marketplace(). This method is intentionally a no-op for
-    // marketplace loading so we don't query the private units table.
-    debugPrint(
-      'Supabase: units are loaded through the secure marketplace RPC.',
-    );
+      for (final candidate in properties) {
+        if (candidate.id == unit.propertyId) {
+          property = candidate;
+          break;
+        }
+      }
+
+      if (property != null) {
+        unit.propertyName = property.name;
+        unit.location = property.location;
+      }
+    }
+
+    debugPrint('Supabase: loaded ${apartments.length} units.');
   }
 
   static Future<void> loadMarketplaceDataFromSupabase() async {
-    // Properties must load first because units use property information
-    // such as property name and location.
-    await loadPropertiesFromSupabase();
-    // Load units only after properties are available.
-    await loadUnitsFromSupabase();
+    debugPrint(
+      'MARKETPLACE: Starting properties + units loading in parallel...',
+    );
+
+    await Future.wait([loadPropertiesFromSupabase(), loadUnitsFromSupabase()]);
+
+    debugPrint(
+      'MARKETPLACE: Finished loading '
+      '${properties.length} properties and '
+      '${apartments.length} units.',
+    );
   }
 
   // ============================================================
@@ -8941,7 +8736,6 @@ class _TenantNotificationsPageState extends State<TenantNotificationsPage> {
       ),
 
       floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'notifications_add',
         onPressed: _createNotification,
         icon: const Icon(Icons.add),
         label: const Text('Add Notification'),
@@ -9381,7 +9175,6 @@ class _TenantsPageState extends State<TenantsPage> {
       ),
 
       floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'tenants_add',
         onPressed: _showAddTenantDialog,
         icon: const Icon(Icons.person_add),
         label: const Text('Add Tenant'),
@@ -11282,7 +11075,6 @@ class _LandlordsPageState extends State<LandlordsPage> {
               },
             ),
       floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'landlords_add',
         onPressed: _showAddLandlordDialog,
         icon: const Icon(Icons.person_add),
         label: const Text('Add Landlord'),
@@ -14753,6 +14545,12 @@ class _PublicUserPageState extends State<PublicUserPage> {
         _loadingApartments = false;
         _loadError = null;
       });
+
+      debugPrint(
+        'PUBLIC FIND APARTMENT: '
+        '${OpenNestStore.properties.length} properties, '
+        '${OpenNestStore.apartments.length} units loaded.',
+      );
     } catch (e) {
       debugPrint('PUBLIC FIND APARTMENT LOAD ERROR: $e');
 
@@ -14776,16 +14574,6 @@ class _PublicUserPageState extends State<PublicUserPage> {
   }
 
   List<Apartment> get _apartments {
-    for (final unit in OpenNestStore.apartments) {
-      debugPrint(
-        'PUBLIC FILTER UNIT: '
-        'number=${unit.number} '
-        'propertyId=${unit.propertyId} '
-        'property=${unit.propertyName} '
-        'status=${unit.status}',
-      );
-    }
-
     final results = OpenNestStore.apartments.where((apartment) {
       // Only vacant units are publicly available.
       if (apartment.status.toLowerCase() != 'vacant') {
@@ -16425,59 +16213,117 @@ class _ChatListScreenState extends State<ChatListScreen> {
       _contacts.clear();
       _conversations.clear();
 
-      debugPrint('MESSAGING: current user = $_currentUserId');
-      debugPrint('MESSAGING: property = $_propertyId');
-
       /*
-       * Messaging contacts are loaded through the secure
-       * get_messaging_contacts() RPC.
+       * Load every tenant belonging to the same property.
        *
-       * The database decides:
-       * - which users belong to this property
-       * - which users are visible
-       * - which users can actually be messaged
-       *
-       * Flutter does NOT directly query tenants, landlords,
-       * or private property records just to build the directory.
+       * The current tenant is excluded from the contact list.
        */
-      final response = await OpenNestStore.supabase.rpc(
-        'get_messaging_contacts',
-        params: {'p_property_id': _propertyId},
-      );
+      final tenantResponse = await OpenNestStore.supabase
+          .from('tenants')
+          .select(
+            'id, auth_user_id, full_name, email, phone, '
+            'property_id, unit_id, account_status',
+          )
+          .eq('property_id', _propertyId)
+          .eq('account_status', 'active');
 
-      debugPrint('MESSAGING: secure contacts response = $response');
+      for (final row in tenantResponse) {
+        final tenant = Map<String, dynamic>.from(row);
 
-      for (final row in response) {
-        final contact = Map<String, dynamic>.from(row);
+        final authId = tenant['auth_user_id']?.toString() ?? '';
 
-        final profileId = contact['profile_id']?.toString() ?? '';
-
-        if (profileId.isEmpty || profileId == _currentUserId) {
+        if (authId.isEmpty || authId == _currentUserId) {
           continue;
         }
 
-        final role = contact['role']?.toString().toLowerCase() ?? '';
-        final canChat = contact['can_chat'] == true;
-
         _contacts.add({
-          'id': profileId,
-          'profile_id': profileId,
-          'name':
-              contact['display_name']?.toString() ??
-              (role == 'landlord'
-                  ? 'Landlord'
-                  : role == 'owner'
-                  ? 'Owner'
-                  : 'Tenant'),
-          'email': '',
-          'type': role,
-          'unit_id': '',
-          'tenant_id': '',
-          'can_chat': canChat,
+          'id': authId,
+          'profile_id': authId,
+          'name': tenant['full_name']?.toString() ?? 'Tenant',
+          'email': tenant['email']?.toString() ?? '',
+          'type': 'tenant',
+          'unit_id': tenant['unit_id']?.toString() ?? '',
+          'tenant_id': tenant['id']?.toString() ?? '',
         });
       }
 
-      debugPrint('MESSAGING: loaded ${_contacts.length} secure contacts');
+      /*
+       * Load the landlord assigned to this property.
+       *
+       * Relationship:
+       * tenant.property_id
+       *       -> properties.landlord_id
+       *       -> landlords.id
+       *       -> landlords.auth_user_id
+       *
+       * The messaging profile_id MUST be the Supabase Auth UUID.
+       */
+      debugPrint('MESSAGING: current tenant auth ID = $_currentUserId');
+      debugPrint('MESSAGING: current property ID = $_propertyId');
+
+      final propertyResponse = await OpenNestStore.supabase
+          .from('properties')
+          .select('id, name, landlord_id')
+          .eq('id', _propertyId)
+          .maybeSingle();
+
+      debugPrint('MESSAGING: property response = $propertyResponse');
+
+      if (propertyResponse != null) {
+        final landlordDatabaseId =
+            propertyResponse['landlord_id']?.toString() ?? '';
+
+        debugPrint('MESSAGING: property landlord_id = $landlordDatabaseId');
+
+        if (landlordDatabaseId.isNotEmpty) {
+          final landlordResponse = await OpenNestStore.supabase
+              .from('landlords')
+              .select('id, auth_user_id, full_name, email, phone')
+              .eq('auth_user_id', landlordDatabaseId)
+              .maybeSingle();
+
+          debugPrint('MESSAGING: landlord response = $landlordResponse');
+
+          if (landlordResponse != null) {
+            final landlord = Map<String, dynamic>.from(landlordResponse);
+
+            final landlordAuthId = landlord['auth_user_id']?.toString() ?? '';
+
+            debugPrint('MESSAGING: landlord auth_user_id = $landlordAuthId');
+
+            if (landlordAuthId.isNotEmpty && landlordAuthId != _currentUserId) {
+              _contacts.insert(0, {
+                'id': landlordAuthId,
+                'profile_id': landlordAuthId,
+                'name': landlord['full_name']?.toString() ?? 'Landlord',
+                'email': landlord['email']?.toString() ?? '',
+                'type': 'landlord',
+                'unit_id': '',
+                'tenant_id': '',
+              });
+
+              debugPrint(
+                'MESSAGING: LANDLORD CONTACT ADDED: '
+                '${landlord['full_name']} ($landlordAuthId)',
+              );
+            } else {
+              debugPrint(
+                'MESSAGING: landlord auth_user_id is empty '
+                'or matches current tenant.',
+              );
+            }
+          } else {
+            debugPrint(
+              'MESSAGING: NO LANDLORD FOUND for ID '
+              '$landlordDatabaseId',
+            );
+          }
+        } else {
+          debugPrint('MESSAGING: PROPERTY HAS NO landlord_id');
+        }
+      } else {
+        debugPrint('MESSAGING: PROPERTY NOT FOUND for $_propertyId');
+      }
 
       await _loadExistingConversations();
 
@@ -16487,7 +16333,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         _loading = false;
       });
     } catch (e) {
-      debugPrint('MESSAGING LOAD ERROR: $e');
+      debugPrint('TENANT MESSAGES LOAD ERROR: $e');
 
       if (!mounted) return;
 
@@ -16562,9 +16408,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           continue;
         }
 
-        final cutoff = DateTime.now().toUtc().subtract(
-          const Duration(days: 30),
-        );
+        final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
 
         final latestMessage = await OpenNestStore.supabase
             .from('messages')
@@ -16681,24 +16525,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   Widget _contactAvatar(Map<String, dynamic> contact, {double radius = 25}) {
-    final type = contact['type']?.toString().toLowerCase() ?? 'tenant';
-
-    final isLandlord = type == 'landlord';
-    final isOwner = type == 'owner';
+    final isLandlord = contact['type'] == 'landlord';
 
     return CircleAvatar(
       radius: radius,
-      backgroundColor: isOwner
-          ? const Color(0xFF6A1B9A)
-          : isLandlord
+      backgroundColor: isLandlord
           ? const Color(0xFF075E54)
           : const Color(0xFF128C7E),
       child: Icon(
-        isOwner
-            ? Icons.admin_panel_settings_outlined
-            : isLandlord
-            ? Icons.home_work_outlined
-            : Icons.person_outline,
+        isLandlord ? Icons.home_work_outlined : Icons.person_outline,
         color: Colors.white,
         size: radius,
       ),
@@ -16771,24 +16606,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
                           final hasMessage = latestMessage != null;
 
-                          final canChat = contact['can_chat'] == true;
-
-                          final type =
-                              contact['type']?.toString().toLowerCase() ??
-                              'tenant';
-
-                          final roleLabel = type == 'landlord'
-                              ? 'Landlord'
-                              : type == 'owner'
-                              ? 'Owner'
-                              : 'Tenant';
-
                           final subtitle = hasMessage
                               ? latestMessage['message']?.toString() ??
                                     'Message'
-                              : canChat
-                              ? 'Tap to start chatting'
-                              : 'Messaging unavailable';
+                              : 'Tap to start chatting';
 
                           return Column(
                             children: [
@@ -16797,21 +16618,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                   horizontal: 18,
                                   vertical: 7,
                                 ),
-                                leading: Opacity(
-                                  opacity: canChat ? 1.0 : 0.55,
-                                  child: _contactAvatar(contact, radius: 28),
-                                ),
+                                leading: _contactAvatar(contact, radius: 28),
                                 title: Row(
                                   children: [
                                     Expanded(
                                       child: Text(
                                         contact['name']?.toString() ?? 'Member',
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           fontWeight: FontWeight.w700,
                                           fontSize: 16,
-                                          color: canChat
-                                              ? Colors.black87
-                                              : Colors.grey.shade600,
                                         ),
                                       ),
                                     ),
@@ -16837,10 +16652,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
-                                            color: canChat
-                                                ? (hasMessage
-                                                      ? Colors.grey.shade700
-                                                      : Colors.grey.shade500)
+                                            color: hasMessage
+                                                ? Colors.grey.shade700
                                                 : Colors.grey.shade500,
                                           ),
                                         ),
@@ -16852,10 +16665,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                           vertical: 3,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: type == 'owner'
-                                              ? const Color(0xFF6A1B9A)
-                                                    .withValues(alpha: 0.10)
-                                              : type == 'landlord'
+                                          color: contact['type'] == 'landlord'
                                               ? const Color(0xFF075E54)
                                                     .withValues(alpha: 0.10)
                                               : const Color(0xFF128C7E)
@@ -16865,13 +16675,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                           ),
                                         ),
                                         child: Text(
-                                          roleLabel,
+                                          contact['type'] == 'landlord'
+                                              ? 'Landlord'
+                                              : 'Tenant',
                                           style: TextStyle(
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600,
-                                            color: type == 'owner'
-                                                ? const Color(0xFF6A1B9A)
-                                                : type == 'landlord'
+                                            color: contact['type'] == 'landlord'
                                                 ? const Color(0xFF075E54)
                                                 : const Color(0xFF128C7E),
                                           ),
@@ -16880,19 +16690,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                     ],
                                   ),
                                 ),
-                                trailing: canChat
-                                    ? const Icon(
-                                        Icons.chevron_right,
-                                        color: Colors.grey,
-                                      )
-                                    : Icon(
-                                        Icons.lock_outline_rounded,
-                                        color: Colors.grey.shade400,
-                                        size: 20,
-                                      ),
-                                onTap: canChat
-                                    ? () => _openContact(contact)
-                                    : null,
+                                trailing: const Icon(
+                                  Icons.chevron_right,
+                                  color: Colors.grey,
+                                ),
+                                onTap: () => _openContact(contact),
                               ),
                               const Divider(height: 1, indent: 82),
                             ],
@@ -16992,7 +16794,7 @@ class _TenantChatConversationScreenState
 
   Future<void> _loadMessages() async {
     try {
-      final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 30));
+      final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
 
       final response = await OpenNestStore.supabase
           .from('messages')
