@@ -76,6 +76,7 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
     );
 
     _loadLandlordUnits();
+    _loadPropertySuspensionStatus();
   }
 
   Future<void> _loadLandlordUnits() async {
@@ -186,19 +187,100 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
   int get maintenanceCount =>
       assignedUnits.where((u) => u.status == 'Under Maintenance').length;
 
-  void _openPage(int index) {
-    debugPrint('LANDLORD NAV DEBUG: _openPage called with index=$index');
+  bool _propertySuspended = false;
+  bool _checkingPropertyStatus = true;
 
-    // Landlords can access the dashboard only.
-    if (index != 0) {
-      debugPrint('LANDLORD NAV LOCK: blocked navigation to index=$index');
+  Future<void> _loadPropertySuspensionStatus() async {
+    final propertyId = widget.landlord.propertyId.trim();
+
+    if (propertyId.isEmpty) {
+      debugPrint(
+        'LANDLORD SUSPENSION: No property ID available; '
+        'keeping property active.',
+      );
+
+      if (mounted) {
+        setState(() {
+          _propertySuspended = false;
+          _checkingPropertyStatus = false;
+        });
+      }
+
+      return;
+    }
+
+    try {
+      final row = await _supabase
+          .from('properties')
+          .select('is_suspended')
+          .eq('id', propertyId)
+          .maybeSingle();
+
+      final suspended = row?['is_suspended'] == true;
+
+      debugPrint(
+        'LANDLORD SUSPENSION: property=$propertyId '
+        'is_suspended=$suspended',
+      );
 
       if (!mounted) return;
+
+      setState(() {
+        _propertySuspended = suspended;
+        _checkingPropertyStatus = false;
+      });
+
+      // If the property was suspended while the landlord was
+      // viewing another page, immediately return to Dashboard.
+      if (suspended && _currentIndex != 0) {
+        setState(() {
+          _currentIndex = 0;
+        });
+      }
+    } catch (e) {
+      debugPrint('LANDLORD SUSPENSION CHECK ERROR: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _propertySuspended = false;
+        _checkingPropertyStatus = false;
+      });
+    }
+  }
+
+  Future<void> _openPage(int index) async {
+    debugPrint('LANDLORD NAV DEBUG: _openPage called with index=$index');
+
+    // Dashboard is always available.
+    if (index == 0) {
+      if (!mounted) return;
+
+      setState(() {
+        _currentIndex = 0;
+      });
+
+      debugPrint('LANDLORD NAV DEBUG: currentIndex changed to $_currentIndex');
+
+      return;
+    }
+
+    // Always check the latest property state before allowing
+    // access to landlord functionality.
+    await _loadPropertySuspensionStatus();
+
+    if (!mounted) return;
+
+    if (_propertySuspended) {
+      debugPrint(
+        'LANDLORD NAV LOCK: property is suspended; '
+        'blocked index=$index',
+      );
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'This page is currently unavailable. '
+            'This apartment is currently suspended. '
             'Only your dashboard is accessible.',
           ),
           behavior: SnackBarBehavior.floating,
@@ -209,7 +291,7 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
     }
 
     setState(() {
-      _currentIndex = 0;
+      _currentIndex = index;
     });
 
     debugPrint('LANDLORD NAV DEBUG: currentIndex changed to $_currentIndex');

@@ -1697,53 +1697,58 @@ class _JumaaOwnerDashboardState extends State<JumaaOwnerDashboard> {
     String? reason,
   }) async {
     try {
-      final updatedRows = await _supabase
-          .from('profiles')
-          .update({
-            'account_status': newStatus,
-            'suspension_reason': newStatus == 'suspended' ? reason : null,
-            'suspended_at': newStatus == 'suspended'
-                ? DateTime.now().toIso8601String()
-                : null,
-          })
-          .eq('id', userId)
-          .eq('role', 'owner')
-          .select(
-            'id,full_name,email,role,account_status,'
-            'suspension_reason,suspended_at',
-          );
+      final isSuspending = newStatus == 'suspended';
 
-      final rows = List<Map<String, dynamic>>.from(updatedRows);
+      debugPrint(
+        'JUMAA OWNER: ${isSuspending ? 'Suspending' : 'Unsuspending'} '
+        'owner=$userId name=$name',
+      );
 
-      if (rows.isEmpty) {
+      final response = await _supabase.functions.invoke(
+        'manage-jumaa-property',
+        body: {
+          'action': isSuspending ? 'suspend_owner' : 'unsuspend_owner',
+          'owner_id': userId,
+          if (isSuspending && reason != null && reason.trim().isNotEmpty)
+            'reason': reason.trim(),
+        },
+      );
+
+      debugPrint('JUMAA OWNER STATUS RESPONSE: ${response.data}');
+
+      final data = response.data;
+
+      if (data is! Map) {
         throw Exception(
-          'No owner profile was updated. Check Supabase RLS permissions.',
+          'Unexpected response from the property management service.',
         );
       }
 
-      final updated = rows.first;
-      final actualStatus = updated['account_status']
-          ?.toString()
-          .toLowerCase()
-          .trim();
+      final success = data['success'] == true;
 
-      if (actualStatus != newStatus) {
+      if (!success) {
         throw Exception(
-          'Database returned status "$actualStatus" instead of '
-          '"$newStatus".',
+          data['error']?.toString() ?? 'The owner status could not be changed.',
         );
       }
 
-      debugPrint('JUMAA OWNER: $name status changed to $actualStatus');
+      final propertiesUpdated = data['properties_updated']?.toString() ?? '0';
+
+      debugPrint(
+        'JUMAA OWNER: $name status changed to $newStatus; '
+        'properties_updated=$propertiesUpdated',
+      );
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            newStatus == 'suspended'
-                ? '$name has been suspended.'
-                : '$name has been unsuspended.',
+            isSuspending
+                ? '$name has been suspended. '
+                      '$propertiesUpdated apartment(s) paused.'
+                : '$name has been unsuspended. '
+                      '$propertiesUpdated apartment(s) restored.',
           ),
         ),
       );

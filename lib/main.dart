@@ -7900,6 +7900,7 @@ class OpenNestStore {
     }
 
     try {
+      // Load the tenant record first.
       final tenantRow = await supabase
           .from('tenants')
           .select('''
@@ -7921,34 +7922,84 @@ class OpenNestStore {
               phone,
               email,
               county,
-              subcounty
-            ),
-            units (
-              id,
-              unit_number,
-              unit_type,
-              rent,
-              monthly_rent,
-              status
+              subcounty,
+              is_suspended
             )
           ''')
           .eq('auth_user_id', user.id)
           .maybeSingle();
 
       if (tenantRow == null) {
-        debugPrint('TENANT PROFILE: No tenant found for auth user ${user.id}');
+        debugPrint(
+          'TENANT PROFILE: No tenant found for auth user ${user.id}',
+        );
         return null;
       }
+
+      final profile = Map<String, dynamic>.from(tenantRow);
+
+      final propertyId = tenantRow['property_id']?.toString().trim() ?? '';
+      final unitId = tenantRow['unit_id']?.toString().trim() ?? '';
 
       debugPrint(
         'TENANT PROFILE: '
         '${tenantRow['full_name']} | '
         '${tenantRow['email']} | '
-        'property=${tenantRow['property_id']} | '
-        'unit=${tenantRow['unit_id']}',
+        'property=$propertyId | '
+        'unit=$unitId',
       );
 
-      return Map<String, dynamic>.from(tenantRow);
+      // Explicitly load the assigned unit using tenants.unit_id.
+      // We do this instead of relying on PostgREST's nested relationship,
+      // because the tenant can have a valid unit_id even when the embedded
+      // units relationship returns null.
+      if (unitId.isNotEmpty) {
+        try {
+          final unitRow = await supabase
+              .from('units')
+              .select('''
+                id,
+                property_id,
+                unit_number,
+                unit_type,
+                rent,
+                monthly_rent,
+                status
+              ''')
+              .eq('id', unitId)
+              .maybeSingle();
+
+          if (unitRow != null) {
+            profile['units'] = Map<String, dynamic>.from(unitRow);
+
+            debugPrint(
+              'TENANT UNIT LOAD: '
+              'id=${unitRow['id']} | '
+              'number=${unitRow['unit_number']} | '
+              'type=${unitRow['unit_type']} | '
+              'rent=${unitRow['monthly_rent'] ?? unitRow['rent']} | '
+              'status=${unitRow['status']}',
+            );
+          } else {
+            profile['units'] = null;
+
+            debugPrint(
+              'TENANT UNIT LOAD: No unit found for unit_id=$unitId',
+            );
+          }
+        } catch (e) {
+          profile['units'] = null;
+          debugPrint('TENANT UNIT LOAD ERROR: $e');
+        }
+      } else {
+        profile['units'] = null;
+        debugPrint('TENANT UNIT LOAD: Tenant has no unit_id.');
+      }
+
+      debugPrint('TENANT PROPERTY DATA: ${profile['properties']}');
+      debugPrint('TENANT UNIT DATA: ${profile['units']}');
+
+      return profile;
     } catch (e) {
       debugPrint('TENANT PROFILE LOAD ERROR: $e');
       return null;
@@ -8026,26 +8077,88 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
     return text.isEmpty ? fallback : text;
   }
 
-  void _selectPage(int index) {
+  Future<bool> _isTenantPropertySuspended() async {
+    final propertyId = tenant['property_id']?.toString().trim() ?? '';
+
+    if (propertyId.isEmpty) {
+      debugPrint(
+        'TENANT SUSPENSION: No property ID available; '
+        'treating property as active.',
+      );
+      return false;
+    }
+
+    try {
+      final row = await OpenNestStore.supabase
+          .from('properties')
+          .select('is_suspended')
+          .eq('id', propertyId)
+          .maybeSingle();
+
+      final suspended = row?['is_suspended'] == true;
+
+      debugPrint(
+        'TENANT SUSPENSION: property=$propertyId '
+        'is_suspended=$suspended',
+      );
+
+      return suspended;
+    } catch (e) {
+      debugPrint('TENANT SUSPENSION CHECK ERROR: $e');
+
+      // Do not unexpectedly lock a tenant because of a temporary
+      // network/query failure. The server-side property state will
+      // still be enforced where applicable.
+      return false;
+    }
+  }
+
+  Future<void> _selectPage(int index) async {
     if (!mounted) return;
 
-    // Tenants can access the dashboard only.
-    if (index != 0) {
+    // Dashboard is always available.
+    if (index == 0) {
+      setState(() {
+        currentIndex = 0;
+      });
+      return;
+    }
+
+    final suspended = await _isTenantPropertySuspended();
+
+    if (!mounted) return;
+
+    if (suspended) {
+      debugPrint(
+        'TENANT NAV LOCK: property is suspended; '
+        'blocked index=$index',
+      );
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'This page is currently unavailable. '
+            'This apartment is currently suspended. '
             'Only your dashboard is accessible.',
           ),
           behavior: SnackBarBehavior.floating,
         ),
       );
+
+      // Make sure the tenant remains on Dashboard.
+      if (currentIndex != 0) {
+        setState(() {
+          currentIndex = 0;
+        });
+      }
+
       return;
     }
 
     setState(() {
-      currentIndex = 0;
+      currentIndex = index;
     });
+
+    debugPrint('TENANT NAV DEBUG: currentIndex changed to $currentIndex');
   }
 
   List<Widget> get pages => [

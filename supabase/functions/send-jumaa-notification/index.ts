@@ -495,6 +495,55 @@ Deno.serve(async (req) => {
         throw new Error("Notification recipient could not be determined.");
       }
 
+      // ------------------------------------------------------------
+      // PROPERTY SUSPENSION GUARD
+      //
+      // Operational notifications belonging to a suspended property
+      // must not be delivered. The notification row may still exist,
+      // but FCM delivery is blocked here as a server-side safeguard.
+      //
+      // JUMAA Owner notifications are not property-scoped and therefore
+      // are unaffected by this check.
+      // ------------------------------------------------------------
+      if (notification.property_id) {
+        const propertyResponse = await fetch(
+          `${SUPABASE_URL}/rest/v1/properties?id=eq.${encodeURIComponent(notification.property_id)}&select=id,is_suspended`,
+          {
+            headers: supabaseHeaders,
+          },
+        );
+
+        if (!propertyResponse.ok) {
+          throw new Error("Failed to load notification property status.");
+        }
+
+        const propertyRows = await propertyResponse.json();
+
+        if (propertyRows.length && propertyRows[0].is_suspended === true) {
+          console.log(
+            `Notification ${notification.id} blocked because property ` +
+            `${notification.property_id} is suspended.`,
+          );
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              blocked: true,
+              reason: "property_suspended",
+              notification_id: notification.id,
+              property_id: notification.property_id,
+            }),
+            {
+              status: 200,
+              headers: {
+                ...corsHeaders,
+                "Content-Type": "application/json",
+              },
+            },
+          );
+        }
+      }
+
       const title = notification.title ?? "JUMAA Notification";
       const message = notification.message ?? "You have a new notification.";
 
@@ -647,7 +696,50 @@ Deno.serve(async (req) => {
 
     const booking = bookings[0];
 
-    // 2. Prevent duplicate notifications if the webhook retries.
+    // 2. Check property suspension BEFORE registering the notification
+    // event. A suspended property is operationally paused, so no
+    // server-generated booking notification should be processed.
+    const propertyStatusResponse = await fetch(
+      `${SUPABASE_URL}/rest/v1/properties?id=eq.${encodeURIComponent(booking.property_id)}&select=id,is_suspended`,
+      {
+        headers: supabaseHeaders,
+      },
+    );
+
+    if (!propertyStatusResponse.ok) {
+      throw new Error("Failed to load property suspension status.");
+    }
+
+    const propertyStatusRows = await propertyStatusResponse.json();
+
+    if (
+      propertyStatusRows.length &&
+      propertyStatusRows[0].is_suspended === true
+    ) {
+      console.log(
+        `Booking notification blocked because property ` +
+        `${booking.property_id} is suspended.`,
+      );
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          blocked: true,
+          reason: "property_suspended",
+          property_id: booking.property_id,
+          booking_id: booking.id,
+        }),
+        {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+    }
+
+    // 3. Prevent duplicate notifications if the webhook retries.
     const eventResponse = await fetch(
       `${SUPABASE_URL}/rest/v1/notification_events`,
       {
@@ -690,9 +782,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 3. Load property and landlord.
+    // 4. Load property and landlord.
     const propertyResponse = await fetch(
-      `${SUPABASE_URL}/rest/v1/properties?id=eq.${encodeURIComponent(booking.property_id)}&select=id,name,landlord_id`,
+      `${SUPABASE_URL}/rest/v1/properties?id=eq.${encodeURIComponent(booking.property_id)}&select=id,name,landlord_id,is_suspended`,
       {
         headers: supabaseHeaders,
       },
@@ -710,7 +802,7 @@ Deno.serve(async (req) => {
 
     const property = properties[0];
 
-    // 3. Resolve landlord Auth ID.
+    // 5. Resolve landlord Auth ID.
     const landlordResponse = await fetch(
       `${SUPABASE_URL}/rest/v1/landlords?id=eq.${encodeURIComponent(property.landlord_id)}&select=id,auth_user_id,full_name,email`,
       {
@@ -735,7 +827,7 @@ Deno.serve(async (req) => {
       throw new Error("Landlord Auth ID could not be determined.");
     }
 
-    // 4. Load exact unit.
+    // 6. Load exact unit.
     const unitResponse = await fetch(
       `${SUPABASE_URL}/rest/v1/units?id=eq.${encodeURIComponent(booking.unit_id)}&select=id,unit_number,unit_type`,
       {
@@ -759,7 +851,7 @@ Deno.serve(async (req) => {
     const title = "🏠 New Booking Request";
     const message = `${booking.applicant_name} requested ${unitLabel} at ${propertyName}.`;
 
-    // 5. Create in-app notification.
+    // 7. Create in-app notification.
     const notificationResponse = await fetch(
       `${SUPABASE_URL}/rest/v1/notifications`,
       {
@@ -786,7 +878,7 @@ Deno.serve(async (req) => {
       console.error("Notification insert failed:", result);
     }
 
-    // 6. Get all registered landlord devices.
+    // 8. Get all registered landlord devices.
     const tokenResponse = await fetch(
       `${SUPABASE_URL}/rest/v1/push_tokens?user_id=eq.${encodeURIComponent(landlordAuthId)}&select=id,token,platform`,
       {
@@ -800,7 +892,7 @@ Deno.serve(async (req) => {
 
     const tokens = await tokenResponse.json();
 
-    // 7. Send push to every registered device.
+    // 9. Send push to every registered device.
     const pushResults = [];
 
     for (const tokenRecord of tokens) {
@@ -826,7 +918,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 8. Send email.
+    // 10. Send email.
     let emailSent = false;
 
     if (landlord.email) {

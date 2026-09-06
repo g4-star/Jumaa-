@@ -6,11 +6,18 @@ const BREVO_API_KEY = Deno.env.get('BREVO_API_KEY')!;
 const EMAIL_FROM =
   Deno.env.get('EMAIL_FROM') ?? 'JUMAA <your-verified-email@example.com>';
 
-type Action = 'mark' | 'suspend' | 'unsuspend' | 'delete';
+type Action =
+  | 'mark'
+  | 'suspend'
+  | 'unsuspend'
+  | 'delete'
+  | 'suspend_owner'
+  | 'unsuspend_owner';
 
 interface RequestBody {
   action: Action;
-  property_id: string;
+  property_id?: string;
+  owner_id?: string;
   reason?: 'malfunction' | 'other' | 'subscription';
 }
 
@@ -227,11 +234,36 @@ Deno.serve(async (req) => {
     // ----------------------------------------------------------
     const body: RequestBody = await req.json();
 
-    if (!body.action || !body.property_id) {
+    if (!body.action) {
       return json(
         {
           success: false,
-          error: 'action and property_id are required.',
+          error: 'action is required.',
+        },
+        400,
+      );
+    }
+
+    const ownerActions = [
+      'suspend_owner',
+      'unsuspend_owner',
+    ].includes(body.action);
+
+    if (ownerActions && !body.owner_id) {
+      return json(
+        {
+          success: false,
+          error: 'owner_id is required for owner actions.',
+        },
+        400,
+      );
+    }
+
+    if (!ownerActions && !body.property_id) {
+      return json(
+        {
+          success: false,
+          error: 'property_id is required for property actions.',
         },
         400,
       );
@@ -242,6 +274,8 @@ Deno.serve(async (req) => {
       'suspend',
       'unsuspend',
       'delete',
+      'suspend_owner',
+      'unsuspend_owner',
     ];
 
     if (!validActions.includes(body.action)) {
@@ -249,10 +283,242 @@ Deno.serve(async (req) => {
         {
           success: false,
           error:
-            'Invalid action. Use mark, suspend, unsuspend or delete.',
+            'Invalid action.', 
         },
         400,
       );
+    }
+
+    // ==========================================================
+    // OWNER-LEVEL SUSPEND / UNSUSPEND
+    // ==========================================================
+    // Suspending an owner pauses every property belonging to that
+    // owner. Landlord and tenant profiles remain active; their
+    // access is restricted by the property's suspension state.
+    // ==========================================================
+    if (
+      body.action === 'suspend_owner' ||
+      body.action === 'unsuspend_owner'
+    ) {
+      const ownerId = body.owner_id!.trim();
+
+      const ownerResponse = await supabaseFetch(
+        `/rest/v1/profiles?id=eq.${encodeURIComponent(ownerId)}&select=id,full_name,email,role,account_status&limit=1`,
+      );
+
+      if (!ownerResponse.ok) {
+        return json(
+          {
+            success: false,
+            error: 'Could not load the apartment owner profile.',
+          },
+          500,
+        );
+      }
+
+      const ownerRows = await ownerResponse.json();
+
+      if (!Array.isArray(ownerRows) || ownerRows.length === 0) {
+        return json(
+          {
+            success: false,
+            error: 'Apartment owner profile not found.',
+          },
+          404,
+        );
+      }
+
+      const targetOwner = ownerRows[0];
+
+      if (
+        targetOwner.role?.toString().toLowerCase().trim() !==
+        'owner'
+      ) {
+        return json(
+          {
+            success: false,
+            error: 'The selected account is not an apartment owner.',
+          },
+          400,
+        );
+      }
+
+      const ownerPropertiesResponse = await supabaseFetch(
+        `/rest/v1/properties?owner_id=eq.${encodeURIComponent(ownerId)}&select=id,name,landlord_id`,
+      );
+
+      if (!ownerPropertiesResponse.ok) {
+        return json(
+          {
+            success: false,
+            error: 'Could not load the owner properties.',
+          },
+          500,
+        );
+      }
+
+      const ownerProperties = await ownerPropertiesResponse.json();
+
+      if (!Array.isArray(ownerProperties)) {
+        return json(
+          {
+            success: false,
+            error: 'Invalid property data returned by Supabase.',
+          },
+          500,
+        );
+      }
+
+      const isSuspending = body.action === 'suspend_owner';
+      const reason =
+        body.reason ||
+        'other';
+
+      if (isSuspending) {
+        // Pause every property belonging to this owner.
+        const propertyPatchResponse = await supabaseFetch(
+          `/rest/v1/properties?owner_id=eq.${encodeURIComponent(ownerId)}`,
+          {
+            method: 'PATCH',
+            headers: {
+              Prefer: 'return=minimal',
+            },
+            body: JSON.stringify({
+              is_suspended: true,
+              suspended_at: new Date().toISOString(),
+              suspended_by: caller.id,
+              suspension_reason: reason,
+            }),
+          },
+        );
+
+        if (!propertyPatchResponse.ok) {
+          const errorText = await propertyPatchResponse.text();
+
+          return json(
+            {
+              success: false,
+              error: 'Could not suspend the owner properties.',
+              details: errorText,
+            },
+            500,
+          );
+        }
+
+        // Suspend the owner profile itself so the owner login can
+        // be restricted to Dashboard + Subscription.
+        const profilePatchResponse = await supabaseFetch(
+          `/rest/v1/profiles?id=eq.${encodeURIComponent(ownerId)}&role=eq.owner`,
+          {
+            method: 'PATCH',
+            headers: {
+              Prefer: 'return=minimal',
+            },
+            body: JSON.stringify({
+              account_status: 'suspended',
+              suspension_reason: reason,
+              suspended_at: new Date().toISOString(),
+            }),
+          },
+        );
+
+        if (!profilePatchResponse.ok) {
+          const errorText = await profilePatchResponse.text();
+
+          return json(
+            {
+              success: false,
+              error:
+                'Properties were suspended, but the owner profile could not be updated.',
+              details: errorText,
+              properties_updated: ownerProperties.length,
+            },
+            500,
+          );
+        }
+
+        return json({
+          success: true,
+          action: 'suspend_owner',
+          owner_id: ownerId,
+          properties_updated: ownerProperties.length,
+          landlord_accounts_unchanged: true,
+          tenant_accounts_unchanged: true,
+        });
+      }
+
+      // UNSUSPEND OWNER
+      const propertyPatchResponse = await supabaseFetch(
+        `/rest/v1/properties?owner_id=eq.${encodeURIComponent(ownerId)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Prefer: 'return=minimal',
+          },
+          body: JSON.stringify({
+            is_suspended: false,
+            suspended_at: null,
+            suspended_by: null,
+            suspension_reason: null,
+            marked_for_action: false,
+            marked_reason: null,
+            marked_at: null,
+            marked_by: null,
+          }),
+        },
+      );
+
+      if (!propertyPatchResponse.ok) {
+        const errorText = await propertyPatchResponse.text();
+
+        return json(
+          {
+            success: false,
+            error: 'Could not unsuspend the owner properties.',
+            details: errorText,
+          },
+          500,
+        );
+      }
+
+      const profilePatchResponse = await supabaseFetch(
+        `/rest/v1/profiles?id=eq.${encodeURIComponent(ownerId)}&role=eq.owner`,
+        {
+          method: 'PATCH',
+          headers: {
+            Prefer: 'return=minimal',
+          },
+          body: JSON.stringify({
+            account_status: 'active',
+            suspension_reason: null,
+            suspended_at: null,
+          }),
+        },
+      );
+
+      if (!profilePatchResponse.ok) {
+        const errorText = await profilePatchResponse.text();
+
+        return json(
+          {
+            success: false,
+            error:
+              'Properties were unsuspended, but the owner profile could not be updated.',
+            details: errorText,
+            properties_updated: ownerProperties.length,
+          },
+          500,
+        );
+      }
+
+      return json({
+        success: true,
+        action: 'unsuspend_owner',
+        owner_id: ownerId,
+        properties_updated: ownerProperties.length,
+        landlord_accounts_unchanged: true,
+        tenant_accounts_unchanged: true,
+      });
     }
 
     // ----------------------------------------------------------
