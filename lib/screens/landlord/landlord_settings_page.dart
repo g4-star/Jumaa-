@@ -391,19 +391,6 @@ class _LandlordSettingsPageState extends State<LandlordSettingsPage> {
 
           const SizedBox(height: 24),
 
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.logout_rounded),
-              title: const Text(
-                'Logout',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: const Text('Sign out of your landlord account.'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: widget.onLogout,
-            ),
-          ),
-
           const SizedBox(height: 30),
 
           Center(

@@ -692,11 +692,32 @@ class _DashboardPageState extends State<DashboardPage> {
     _loadingDashboardData = true;
 
     try {
-      await Future.wait([
-        OpenNestStore.loadPropertiesFromSupabase(),
-        OpenNestStore.loadUnitsFromSupabase(),
-        OpenNestStore.loadLandlords(),
-      ]);
+      final user = OpenNestStore.supabase.auth.currentUser;
+
+      if (user == null) {
+        debugPrint('DASHBOARD DATA: no authenticated user.');
+        return;
+      }
+
+      final profile = await OpenNestStore.supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      final role = profile?['role']?.toString().toLowerCase().trim() ?? '';
+
+      debugPrint('DASHBOARD DATA: current role=$role');
+
+      if (role == 'owner') {
+        debugPrint('DASHBOARD DATA: loading owner data...');
+        await OpenNestStore.loadOwnerPropertiesFromSupabase();
+        await OpenNestStore.loadLandlords();
+      } else {
+        debugPrint(
+          'DASHBOARD DATA: skipping owner loaders for role=$role',
+        );
+      }
     } catch (e) {
       debugPrint('Dashboard data reload failed: $e');
     } finally {
@@ -893,7 +914,7 @@ class _SubscriptionsPlaceholderPageState
       }
 
       if (property == null) {
-        await OpenNestStore.loadPropertiesFromSupabase();
+        await OpenNestStore.loadOwnerPropertiesFromSupabase();
 
         for (final candidate in OpenNestStore.properties) {
           if (candidate.ownerId == user.id) {
@@ -2310,6 +2331,79 @@ class OwnerApartmentManagementPage extends StatefulWidget {
 
 class _OwnerApartmentManagementPageState
     extends State<OwnerApartmentManagementPage> {
+  bool _loadingOwnerProperty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOwnerPropertyData();
+  }
+
+  Future<void> _loadOwnerPropertyData() async {
+    final user = OpenNestStore.supabase.auth.currentUser;
+
+    if (user == null) {
+      debugPrint('OWNER APARTMENT PAGE: skipped - no authenticated user.');
+      return;
+    }
+
+    final profile = await OpenNestStore.supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+
+    final role = profile?['role']?.toString().toLowerCase().trim() ?? '';
+
+    if (role != 'owner') {
+      debugPrint(
+        'OWNER APARTMENT PAGE: skipped because role=$role',
+      );
+      return;
+    }
+    if (_loadingOwnerProperty) return;
+
+    _loadingOwnerProperty = true;
+
+    try {
+      debugPrint('OWNER APARTMENT PAGE: Loading owner property data...');
+
+      await OpenNestStore.loadOwnerPropertiesFromSupabase();
+
+      debugPrint(
+        'OWNER APARTMENT PAGE: Properties='
+        '${OpenNestStore.properties.length}, '
+        'apartments=${OpenNestStore.apartments.length}',
+      );
+
+      for (final property in OpenNestStore.properties) {
+        debugPrint(
+          'OWNER APARTMENT PAGE PROPERTY: '
+          '${property.name} (${property.id}) '
+          'owner=${property.ownerId}',
+        );
+      }
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e, stackTrace) {
+      debugPrint('OWNER APARTMENT PAGE LOAD ERROR: $e');
+      debugPrint('$stackTrace');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load apartments: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      _loadingOwnerProperty = false;
+    }
+  }
+
   Property? get property {
     final user = OpenNestStore.supabase.auth.currentUser;
 
@@ -2351,6 +2445,14 @@ class _OwnerApartmentManagementPageState
   Widget build(BuildContext context) {
     final currentProperty = property;
 
+    if (_loadingOwnerProperty && currentProperty == null) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
     if (currentProperty == null) {
       return Scaffold(
         appBar: AppBar(
@@ -2369,7 +2471,7 @@ class _OwnerApartmentManagementPageState
                 );
 
                 if (mounted) {
-                  await OpenNestStore.loadPropertiesFromSupabase();
+                  await OpenNestStore.loadOwnerPropertiesFromSupabase();
                   setState(() {});
                 }
               },
@@ -2409,7 +2511,7 @@ class _OwnerApartmentManagementPageState
                     );
 
                     if (mounted) {
-                      await OpenNestStore.loadPropertiesFromSupabase();
+                      await OpenNestStore.loadOwnerPropertiesFromSupabase();
                       setState(() {});
                     }
                   },
@@ -2440,7 +2542,7 @@ class _OwnerApartmentManagementPageState
               );
 
               if (mounted) {
-                await OpenNestStore.loadPropertiesFromSupabase();
+                await OpenNestStore.loadOwnerPropertiesFromSupabase();
                 setState(() {});
               }
             },
@@ -5194,7 +5296,7 @@ class _ManageApartmentsPageState extends State<ManageApartmentsPage> {
                         builder: (_) => const AddPropertyPage(),
                       ),
                     ).then((_) async {
-                      await OpenNestStore.loadPropertiesFromSupabase();
+                      await OpenNestStore.loadOwnerPropertiesFromSupabase();
                       if (mounted) {
                         setState(() {});
                       }
@@ -6506,17 +6608,37 @@ class _OwnerPaymentsPageState extends State<OwnerPaymentsPage> {
   Future<void> _loadPayments() async {
     if (!mounted) return;
 
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
     try {
       final user = OpenNestStore.supabase.auth.currentUser;
 
       if (user == null) {
-        throw Exception('Owner session is missing. Please log in again.');
+        debugPrint('OWNER PAYMENTS: skipped because there is no authenticated user.');
+        return;
       }
+
+      final profile = await OpenNestStore.supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      final role =
+          profile?['role']?.toString().toLowerCase().trim() ?? '';
+
+      if (role != 'owner') {
+        debugPrint(
+          'OWNER PAYMENTS: skipped because role=$role '
+          '(user=${user.id})',
+        );
+        return;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
 
       debugPrint('OWNER PAYMENTS: owner=${user.id}');
 
@@ -7575,6 +7697,175 @@ class OpenNestStore {
     );
   }
 
+  // Load only properties and units belonging to the logged-in owner.
+  // This is separate from the public marketplace loader.
+  static Future<void> loadOwnerPropertiesFromSupabase() async {
+    final user = supabase.auth.currentUser;
+
+    if (user == null) {
+      debugPrint('OWNER PROPERTIES: No authenticated user.');
+      properties.clear();
+      apartments.clear();
+      return;
+    }
+
+    // This loader is ONLY for property-owner accounts.
+    // Never let a landlord, tenant, or JUMAA owner/admin
+    // accidentally clear the shared property/unit state.
+    final profile = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+
+    final role = profile?['role']?.toString().toLowerCase().trim() ?? '';
+
+    if (role != 'owner') {
+      debugPrint(
+        'OWNER PROPERTIES: skipped because current role=$role '
+        '(user=${user.id})',
+      );
+      return;
+    }
+
+    debugPrint(
+      'OWNER PROPERTIES: loading properties for owner ${user.id}',
+    );
+
+    final propertyResponse = await supabase
+        .from('properties')
+        .select('''
+          id,
+          owner_id,
+          name,
+          description,
+          location,
+          address,
+          county,
+          subcounty,
+          latitude,
+          longitude,
+          email,
+          phone,
+          payment_method,
+          mpesa_till_number,
+          mpesa_paybill_number,
+          mpesa_account_number,
+          payments_enabled,
+          image_paths
+        ''')
+        .eq('owner_id', user.id)
+        .order('created_at', ascending: false);
+
+    final rows = List<Map<String, dynamic>>.from(propertyResponse);
+
+    final ownerProperties = <Property>[];
+
+    for (final row in rows) {
+      ownerProperties.add(
+        Property(
+          id: row['id']?.toString() ?? '',
+          ownerId: row['owner_id']?.toString() ?? user.id,
+          name: row['name']?.toString() ?? '',
+          county: row['county']?.toString() ?? '',
+          subcounty: row['subcounty']?.toString() ?? '',
+          location: row['location']?.toString() ?? '',
+          address: row['address']?.toString() ?? '',
+          latitude: _toDouble(row['latitude']),
+          longitude: _toDouble(row['longitude']),
+          description: row['description']?.toString() ?? '',
+          email: row['email']?.toString() ?? '',
+          phone: row['phone']?.toString() ?? '',
+          paymentMethod: row['payment_method']?.toString() ?? 'till',
+          mpesaTillNumber: row['mpesa_till_number']?.toString() ?? '',
+          mpesaPaybillNumber:
+              row['mpesa_paybill_number']?.toString() ?? '',
+          mpesaAccountNumber:
+              row['mpesa_account_number']?.toString() ?? '',
+          paymentsEnabled: row['payments_enabled'] is bool
+              ? row['payments_enabled'] as bool
+              : true,
+          imagePaths: row['image_paths'] is List
+              ? List<String>.from(
+                  (row['image_paths'] as List)
+                      .map((item) => item.toString()),
+                )
+              : const [],
+        ),
+      );
+    }
+
+    final propertyIds =
+        ownerProperties.map((property) => property.id).toSet();
+
+    final ownerUnits = <Apartment>[];
+
+    if (propertyIds.isNotEmpty) {
+      final unitResponse = await supabase
+          .from('units')
+          .select('''
+            id,
+            property_id,
+            unit_number,
+            unit_type,
+            monthly_rent,
+            status
+          ''')
+          .inFilter('property_id', propertyIds.toList());
+
+      for (final rawRow in unitResponse) {
+        final row = Map<String, dynamic>.from(rawRow as Map);
+        final propertyId = row['property_id']?.toString() ?? '';
+
+        if (!propertyIds.contains(propertyId)) {
+          continue;
+        }
+
+        final property = ownerProperties.firstWhere(
+          (item) => item.id == propertyId,
+        );
+
+        ownerUnits.add(
+          Apartment(
+            id: row['id']?.toString() ?? '',
+            number: row['unit_number']?.toString() ?? '',
+            type: row['unit_type']?.toString() ?? '',
+            rent: row['monthly_rent']?.toString() ?? '0',
+            tenant: '',
+            status: _normalizeUnitStatus(
+              row['status']?.toString() ?? 'vacant',
+            ),
+            propertyId: propertyId,
+            propertyName: property.name,
+            location: property.location,
+            description: property.description,
+          ),
+        );
+      }
+    }
+
+    properties
+      ..clear()
+      ..addAll(ownerProperties);
+
+    apartments
+      ..clear()
+      ..addAll(ownerUnits);
+
+    debugPrint(
+      'OWNER PROPERTIES: loaded '
+      '${properties.length} properties and '
+      '${apartments.length} units for owner ${user.id}',
+    );
+
+    for (final property in properties) {
+      debugPrint(
+        'OWNER PROPERTY: ${property.name} '
+        '(${property.id}) owner=${property.ownerId}',
+      );
+    }
+  }
+
   static Future<void> loadUnitsFromSupabase() async {
     // Marketplace units are loaded together with their property through
     // get_public_marketplace(). This method is intentionally a no-op for
@@ -7721,10 +8012,27 @@ class OpenNestStore {
       }
 
       // Load only landlords assigned to those properties.
+      debugPrint(
+        'LANDLORDS DEBUG: landlord IDs from properties = $landlordIds',
+      );
+
       final landlordRows = await supabase
           .from('landlords')
           .select('id, full_name, email, phone')
           .inFilter('id', landlordIds);
+
+      debugPrint(
+        'LANDLORDS DEBUG: landlord query returned ${landlordRows.length} row(s)',
+      );
+
+      for (final landlordRow in landlordRows) {
+        debugPrint(
+          'LANDLORD DEBUG ROW: '
+          'id=${landlordRow['id']} '
+          'name=${landlordRow['full_name']} '
+          'email=${landlordRow['email']}',
+        );
+      }
 
       final propertiesByLandlordId = <String, Map<String, dynamic>>{};
 
@@ -8179,6 +8487,7 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
         state?._setDarkMode(enabled);
       },
       showLogout: true,
+      tenantProfile: widget.tenantProfile,
     ),
   ];
 
@@ -8747,6 +9056,7 @@ class _TenantDashboardPageState extends State<TenantDashboardPage> {
           state?._setDarkMode(enabled);
         },
         showLogout: true,
+        tenantProfile: widget.tenantProfile,
       ),
     ];
 
@@ -9218,18 +9528,36 @@ class _TenantsPageState extends State<TenantsPage> {
   }
 
   Future<void> _loadTenants() async {
-    if (mounted) {
-      setState(() {
-        _loadingTenants = true;
-        _tenantLoadError = null;
-      });
-    }
-
     try {
       final currentUser = OpenNestStore.supabase.auth.currentUser;
 
       if (currentUser == null) {
-        throw Exception('No authenticated owner found.');
+        debugPrint('TENANTS: skipped because there is no authenticated user.');
+        return;
+      }
+
+      final profile = await OpenNestStore.supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', currentUser.id)
+          .maybeSingle();
+
+      final role =
+          profile?['role']?.toString().toLowerCase().trim() ?? '';
+
+      if (role != 'owner') {
+        debugPrint(
+          'TENANTS: skipped because role=$role '
+          '(user=${currentUser.id})',
+        );
+        return;
+      }
+
+      if (mounted) {
+        setState(() {
+          _loadingTenants = true;
+          _tenantLoadError = null;
+        });
       }
 
       // Get only properties belonging to the logged-in apartment owner.
@@ -10705,18 +11033,78 @@ class _LandlordsPageState extends State<LandlordsPage> {
   Future<void> _loadLandlords() async {
     if (_loadingLandlords) return;
 
-    setState(() {
-      _loadingLandlords = true;
-    });
+    final user = OpenNestStore.supabase.auth.currentUser;
+
+    if (user == null) {
+      debugPrint('LANDLORDS PAGE: skipped - no authenticated user.');
+      return;
+    }
+
+    final profile = await OpenNestStore.supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+
+    final role = profile?['role']?.toString().toLowerCase().trim() ?? '';
+
+    if (role != 'owner') {
+      debugPrint(
+        'LANDLORDS PAGE: skipped because role=$role',
+      );
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _loadingLandlords = true;
+      });
+    }
 
     try {
+      debugPrint('LANDLORDS PAGE: Loading owner properties first...');
+
+      // Owner-only page:
+      // load the properties belonging to the logged-in owner,
+      // then load landlords assigned to those properties.
+      await OpenNestStore.loadOwnerPropertiesFromSupabase();
+
+      debugPrint(
+        'LANDLORDS PAGE: Owner properties loaded = '
+        '${OpenNestStore.properties.length}',
+      );
+
+      for (final property in OpenNestStore.properties) {
+        debugPrint(
+          'LANDLORDS PAGE PROPERTY: '
+          '${property.name} (${property.id}) '
+          'owner=${property.ownerId}',
+        );
+      }
+
+      // Now load only landlords assigned to those owner properties.
       await OpenNestStore.loadLandlords();
+
+      debugPrint(
+        'LANDLORDS PAGE: Landlords loaded = '
+        '${OpenNestStore.landlords.length}',
+      );
+
+      for (final landlord in OpenNestStore.landlords) {
+        debugPrint(
+          'LANDLORDS PAGE LANDLORD: '
+          '${landlord.fullName} '
+          '${landlord.email} '
+          'property=${landlord.propertyName}',
+        );
+      }
 
       if (mounted) {
         setState(() {});
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('LANDLORDS PAGE LOAD ERROR: $e');
+      debugPrint('$stackTrace');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -11412,11 +11800,13 @@ class SettingsPage extends StatefulWidget {
     required this.isDarkMode,
     required this.onDarkModeChanged,
     this.showLogout = false,
+    this.tenantProfile,
   });
 
   final bool isDarkMode;
   final ValueChanged<bool> onDarkModeChanged;
   final bool showLogout;
+  final Map<String, dynamic>? tenantProfile;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -11429,6 +11819,40 @@ class _SettingsPageState extends State<SettingsPage> {
 
   String managerName = 'Apartment Manager';
   String managerRole = 'Administrator';
+  String apartmentName = '';
+  String tenantName = '';
+  String assignedUnit = '';
+
+  void _loadTenantSettingsIdentity() {
+    final profile = widget.tenantProfile;
+
+    if (profile == null) return;
+
+    final properties = profile['properties'];
+    final units = profile['units'];
+
+    final propertyMap = properties is Map
+        ? Map<String, dynamic>.from(properties)
+        : <String, dynamic>{};
+
+    final unitMap = units is Map
+        ? Map<String, dynamic>.from(units)
+        : <String, dynamic>{};
+
+    apartmentName = profile['properties'] is Map
+        ? propertyMap['name']?.toString().trim() ?? ''
+        : '';
+
+    tenantName = profile['full_name']?.toString().trim() ?? '';
+
+    assignedUnit = unitMap['unit_number']?.toString().trim() ?? '';
+
+    if (tenantName.isNotEmpty) {
+      managerName = tenantName;
+    }
+
+    managerRole = 'Unit Owner';
+  }
 
   String defaultApartmentType = '1 Bedroom';
   bool showVacantFirst = false;
@@ -11447,6 +11871,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    _loadTenantSettingsIdentity();
     _loadOwnerRole();
   }
 
@@ -11493,10 +11918,18 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Icon(Icons.person, size: 28),
               ),
               title: Text(
-                managerName,
+                apartmentName.isNotEmpty
+                    ? apartmentName
+                    : managerName,
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              subtitle: Text(managerRole),
+              subtitle: Text(
+                [
+                  managerRole,
+                  if (tenantName.isNotEmpty) tenantName,
+                  if (assignedUnit.isNotEmpty) 'Unit $assignedUnit',
+                ].join('\n'),
+              ),
               trailing: const Icon(Icons.chevron_right),
               onTap: _showProfileSettings,
             ),
@@ -13116,7 +13549,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           .select()
           .single();
 
-      await OpenNestStore.loadPropertiesFromSupabase();
+      await OpenNestStore.loadOwnerPropertiesFromSupabase();
 
       final propertyId = inserted['id']?.toString() ?? '';
 
@@ -14097,7 +14530,7 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
       // ----------------------------------------------------------
       // 6. Reload properties and units from Supabase.
       // ----------------------------------------------------------
-      await OpenNestStore.loadPropertiesFromSupabase();
+      await OpenNestStore.loadOwnerPropertiesFromSupabase();
       await OpenNestStore.loadUnitsFromSupabase();
 
       if (!mounted) return;
@@ -16506,6 +16939,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
   bool _loading = true;
   bool _creatingChat = false;
 
+  // Used by the owner messaging flow.
+  String? _ownerPropertyId;
+
   final List<Map<String, dynamic>> _contacts = [];
   final List<Map<String, dynamic>> _conversations = [];
 
@@ -16518,6 +16954,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   String get _propertyId =>
       widget.propertyId ??
       widget.tenantProfile?['property_id']?.toString() ??
+      _ownerPropertyId ??
       '';
 
   @override
@@ -16527,7 +16964,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   Future<void> _loadMessagingData() async {
-    if (_propertyId.isEmpty || _currentUserId.isEmpty) {
+    if (_currentUserId.isEmpty) {
       if (mounted) {
         setState(() => _loading = false);
       }
@@ -16538,59 +16975,196 @@ class _ChatListScreenState extends State<ChatListScreen> {
       _contacts.clear();
       _conversations.clear();
 
+      final user = OpenNestStore.supabase.auth.currentUser;
+
       debugPrint('MESSAGING: current user = $_currentUserId');
-      debugPrint('MESSAGING: property = $_propertyId');
+      debugPrint('MESSAGING: auth role = ${user?.userMetadata?['role']}');
+
+      final role =
+          user?.userMetadata?['role']?.toString().toLowerCase() ?? '';
 
       /*
-       * Messaging contacts are loaded through the secure
-       * get_messaging_contacts() RPC.
+       * OWNER MESSAGING
        *
-       * The database decides:
-       * - which users belong to this property
-       * - which users are visible
-       * - which users can actually be messaged
+       * A property owner can only chat with landlords assigned
+       * to the owner's own properties.
        *
-       * Flutter does NOT directly query tenants, landlords,
-       * or private property records just to build the directory.
+       * Owners do NOT see:
+       * - tenants
+       * - other owners
+       * - JUMAA owner/admin
        */
+      if (role == 'owner') {
+        debugPrint('OWNER MESSAGES: loading owner landlords...');
+
+        final propertyRows = await OpenNestStore.supabase
+            .from('properties')
+            .select('id, name, landlord_id')
+            .eq('owner_id', _currentUserId);
+
+        final properties =
+            List<Map<String, dynamic>>.from(propertyRows);
+
+        debugPrint(
+          'OWNER MESSAGES: found ${properties.length} owned properties',
+        );
+
+        if (properties.isNotEmpty) {
+          // The current owner dashboard is property-focused.
+          // Keep the first owned property as the default chat property.
+          _ownerPropertyId =
+              properties.first['id']?.toString();
+
+          final landlordIds = properties
+              .map((property) =>
+                  property['landlord_id']?.toString() ?? '')
+              .where((id) => id.isNotEmpty)
+              .toSet()
+              .toList();
+
+          debugPrint(
+            'OWNER MESSAGES: landlord IDs = $landlordIds',
+          );
+
+          if (landlordIds.isNotEmpty) {
+            final landlordRows = await OpenNestStore.supabase
+                .from('landlords')
+                .select('id, full_name, email, phone')
+                .inFilter('id', landlordIds);
+
+            for (final property in properties) {
+              final landlordId =
+                  property['landlord_id']?.toString() ?? '';
+
+              if (landlordId.isEmpty) continue;
+
+              final matchingLandlords =
+                  landlordRows.where(
+                (row) =>
+                    row['id']?.toString() == landlordId,
+              );
+
+              for (final row in matchingLandlords) {
+                final propertyId =
+                    property['id']?.toString() ?? '';
+
+                final propertyName =
+                    property['name']?.toString() ??
+                    'Property';
+
+                final landlordName =
+                    row['full_name']?.toString() ??
+                    'Landlord';
+
+                _contacts.add({
+                  'id': landlordId,
+                  'profile_id': landlordId,
+                  'name': landlordName,
+                  'email':
+                      row['email']?.toString() ?? '',
+                  'phone':
+                      row['phone']?.toString() ?? '',
+                  'type': 'landlord',
+                  'unit_id': '',
+                  'tenant_id': '',
+                  'property_id': propertyId,
+                  'property_name': propertyName,
+                  'can_chat': true,
+                });
+
+                debugPrint(
+                  'OWNER MESSAGES CONTACT: '
+                  '$landlordName '
+                  '(${row['email']}) '
+                  'property=$propertyName',
+                );
+              }
+            }
+          }
+        }
+
+        debugPrint(
+          'OWNER MESSAGES: loaded '
+          '${_contacts.length} landlord contact(s)',
+        );
+
+        if (!mounted) return;
+
+        setState(() {
+          _loading = false;
+        });
+
+        return;
+      }
+
+      /*
+       * TENANT / OTHER USER MESSAGING
+       *
+       * Keep the existing secure messaging directory.
+       */
+      if (_propertyId.isEmpty) {
+        debugPrint(
+          'MESSAGING: property ID is empty for non-owner user',
+        );
+
+        if (mounted) {
+          setState(() => _loading = false);
+        }
+
+        return;
+      }
+
+      debugPrint('MESSAGING: property = $_propertyId');
+
       final response = await OpenNestStore.supabase.rpc(
         'get_messaging_contacts',
         params: {'p_property_id': _propertyId},
       );
 
-      debugPrint('MESSAGING: secure contacts response = $response');
+      debugPrint(
+        'MESSAGING: secure contacts response = $response',
+      );
 
       for (final row in response) {
         final contact = Map<String, dynamic>.from(row);
 
-        final profileId = contact['profile_id']?.toString() ?? '';
+        final profileId =
+            contact['profile_id']?.toString() ?? '';
 
-        if (profileId.isEmpty || profileId == _currentUserId) {
+        if (profileId.isEmpty ||
+            profileId == _currentUserId) {
           continue;
         }
 
-        final role = contact['role']?.toString().toLowerCase() ?? '';
-        final canChat = contact['can_chat'] == true;
+        final contactRole =
+            contact['role']?.toString().toLowerCase() ?? '';
+
+        final canChat =
+            contact['can_chat'] == true;
 
         _contacts.add({
           'id': profileId,
           'profile_id': profileId,
           'name':
               contact['display_name']?.toString() ??
-              (role == 'landlord'
+              (contactRole == 'landlord'
                   ? 'Landlord'
-                  : role == 'owner'
-                  ? 'Owner'
-                  : 'Tenant'),
+                  : contactRole == 'owner'
+                      ? 'Owner'
+                      : 'Tenant'),
           'email': '',
-          'type': role,
+          'type': contactRole,
           'unit_id': '',
           'tenant_id': '',
           'can_chat': canChat,
+          'property_id': _propertyId,
         });
       }
 
-      debugPrint('MESSAGING: loaded ${_contacts.length} secure contacts');
+      debugPrint(
+        'MESSAGING: loaded '
+        '${_contacts.length} secure contacts',
+      );
 
       await _loadExistingConversations();
 
@@ -16599,15 +17173,21 @@ class _ChatListScreenState extends State<ChatListScreen> {
       setState(() {
         _loading = false;
       });
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('MESSAGING LOAD ERROR: $e');
+      debugPrint('MESSAGING LOAD STACK: $stackTrace');
 
       if (!mounted) return;
 
       setState(() => _loading = false);
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not load messages: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not load messages: $e',
+          ),
+        ),
+      );
     }
   }
 

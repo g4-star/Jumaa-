@@ -141,103 +141,6 @@ class _LandlordTenantsPageState extends State<LandlordTenantsPage> {
     );
   }
 
-  Widget _tenantCard(BuildContext context, Map<String, dynamic> tenant) {
-    final name = tenant['full_name']?.toString().trim().isNotEmpty == true
-        ? tenant['full_name'].toString().trim()
-        : 'Tenant';
-
-    final email = tenant['email']?.toString() ?? '';
-    final phone = tenant['phone']?.toString() ?? '';
-
-    final unit = tenant['units'];
-
-    String unitNumber = 'Unknown';
-
-    if (unit is Map<String, dynamic>) {
-      final number = unit['unit_number']?.toString() ?? '';
-      if (number.trim().isNotEmpty) {
-        unitNumber = number;
-      }
-    }
-
-    final status = tenant['account_status']?.toString() ?? 'active';
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: CircleAvatar(child: Text(name.substring(0, 1).toUpperCase())),
-        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 5),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Unit $unitNumber'),
-              if (phone.isNotEmpty) Text(phone),
-              if (email.isNotEmpty) Text(email),
-            ],
-          ),
-        ),
-        trailing: _statusChip(status),
-        onTap: () => _showTenantDetails(context, tenant, unitNumber),
-      ),
-    );
-  }
-
-  Widget _statusChip(String status) {
-    final label = status.isEmpty
-        ? 'Active'
-        : status[0].toUpperCase() + status.substring(1);
-
-    return Chip(
-      label: Text(label, style: const TextStyle(fontSize: 11)),
-      visualDensity: VisualDensity.compact,
-    );
-  }
-
-  Widget _emptyState() {
-    return RefreshIndicator(
-      onRefresh: _loadTenants,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          SizedBox(height: MediaQuery.of(context).size.height * 0.28),
-          Padding(
-            padding: const EdgeInsets.all(30),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.people_outline,
-                  size: 65,
-                  color: Colors.grey.shade500,
-                ),
-                const SizedBox(height: 15),
-                const Text(
-                  'No tenants yet',
-                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 7),
-                Text(
-                  'No tenants are currently assigned to this property.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 18),
-                OutlinedButton.icon(
-                  onPressed: _loadTenants,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Refresh'),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _errorState() {
     return Center(
       child: Padding(
@@ -245,20 +148,19 @@ class _LandlordTenantsPageState extends State<LandlordTenantsPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, size: 60, color: Colors.red.shade400),
+            const Icon(Icons.error_outline, size: 56, color: Colors.red),
             const SizedBox(height: 16),
             const Text(
-              'Could not load tenants',
-              style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+              'Unable to load tenants',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Text(
-              _error ?? 'Unknown database error.',
+              _error ?? 'An unexpected error occurred.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade600),
             ),
             const SizedBox(height: 18),
-            FilledButton.icon(
+            ElevatedButton.icon(
               onPressed: _loadTenants,
               icon: const Icon(Icons.refresh),
               label: const Text('Try Again'),
@@ -267,6 +169,204 @@ class _LandlordTenantsPageState extends State<LandlordTenantsPage> {
         ),
       ),
     );
+  }
+
+  Widget _emptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.people_outline, size: 64, color: Colors.grey.shade500),
+            const SizedBox(height: 16),
+            const Text(
+              'No Tenants Yet',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Tenants assigned to this property will appear here.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              onPressed: _loadTenants,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Refresh'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tenantCard(BuildContext context, Map<String, dynamic> tenant) {
+    final name = tenant['full_name']?.toString().trim().isNotEmpty == true
+        ? tenant['full_name'].toString().trim()
+        : 'Unknown Tenant';
+
+    final unit = tenant['units'];
+    final unitNumber = unit is Map
+        ? unit['unit_number']?.toString() ?? 'N/A'
+        : 'N/A';
+
+    final phone = tenant['phone']?.toString() ?? '';
+    final email = tenant['email']?.toString() ?? '';
+    final status = tenant['account_status']?.toString() ?? 'active';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: CircleAvatar(
+          child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?'),
+        ),
+        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4),
+            Text('Unit $unitNumber'),
+            if (phone.isNotEmpty) Text(phone),
+            if (email.isNotEmpty) Text(email),
+            Text(
+              'Status: $status',
+              style: TextStyle(
+                color: status.toLowerCase() == 'active'
+                    ? Colors.green
+                    : Colors.orange,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        isThreeLine: true,
+        trailing: PopupMenuButton<String>(
+          onSelected: (value) {
+            if (value == 'delete') {
+              _deleteTenant(context, tenant);
+            }
+          },
+          itemBuilder: (context) => const [
+            PopupMenuItem<String>(
+              value: 'delete',
+              child: Row(
+                children: [
+                  Icon(Icons.delete_outline, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text('Delete Tenant', style: TextStyle(color: Colors.red)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        onTap: () {
+          final unit = tenant['units'];
+          final unitNumber = unit is Map
+              ? unit['unit_number']?.toString() ?? 'N/A'
+              : 'N/A';
+          _showTenantDetails(context, tenant, unitNumber);
+        },
+      ),
+    );
+  }
+
+  Future<void> _deleteTenant(
+    BuildContext context,
+    Map<String, dynamic> tenant,
+  ) async {
+    final tenantId = tenant['id']?.toString();
+    final tenantEmail = tenant['email']?.toString() ?? '';
+    final tenantName = tenant['full_name']?.toString() ?? 'this tenant';
+
+    if (tenantId == null || tenantId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to delete tenant: missing tenant ID.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Tenant?'),
+          content: Text(
+            'Are you sure you want to permanently delete $tenantName?\\n\\n'
+            'This will remove the tenant from the property and delete '
+            'their JUMAA account access. This action cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete Permanently'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final response = await _supabase.functions.invoke(
+        'delete-tenant-account',
+        body: {'tenant_id': tenantId, 'email': tenantEmail},
+      );
+
+      if (context.mounted) {
+        Navigator.of(context).pop();
+      }
+
+      if (response.data is Map && response.data['success'] == false) {
+        throw Exception(
+          response.data['error']?.toString() ?? 'Tenant deletion failed.',
+        );
+      }
+
+      if (!context.mounted) return;
+
+      await _loadTenants();
+
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$tenantName has been permanently deleted.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.of(context)
+            .popUntil((route) => route.isFirst || route.settings.name != null);
+      }
+
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete tenant: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   void _showTenantDetails(

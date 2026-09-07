@@ -108,10 +108,50 @@ class _LandlordBookingPageState extends State<LandlordBookingPage> {
         'LANDLORD BOOKINGS DEBUG: booking_requests response=$response',
       );
 
+      // Booking retention rule:
+      // - Pending bookings remain visible until a decision is made.
+      // - Approved/rejected bookings remain visible for 4 days
+      //   from their last status update.
+      final now = DateTime.now();
+
+      final filteredBookings =
+          List<Map<String, dynamic>>.from(response).where((booking) {
+        final status =
+            booking['status']?.toString().toLowerCase() ?? 'pending';
+
+        if (status == 'pending') {
+          return true;
+        }
+
+        if (status == 'approved' || status == 'rejected') {
+          final updatedAtString = booking['updated_at']?.toString();
+
+          if (updatedAtString == null || updatedAtString.isEmpty) {
+            return true;
+          }
+
+          final updatedAt = DateTime.tryParse(updatedAtString);
+
+          if (updatedAt == null) {
+            return true;
+          }
+
+          // 4 days = 96 hours.
+          return now.difference(updatedAt).inHours < 96;
+        }
+
+        // Preserve any unexpected status rather than hiding it.
+        return true;
+      }).toList();
+
+      debugPrint(
+        'LANDLORD BOOKINGS DEBUG: visible bookings=${filteredBookings.length}',
+      );
+
       if (!mounted) return;
 
       setState(() {
-        _bookings = List<Map<String, dynamic>>.from(response);
+        _bookings = filteredBookings;
         _loading = false;
       });
     } catch (e) {

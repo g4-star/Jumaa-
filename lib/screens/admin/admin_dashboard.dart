@@ -75,6 +75,15 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint(
+      'ADMIN DASHBOARD DATA: properties=${widget.properties.length}, '
+      'apartments=${widget.apartments.length}, '
+      'landlords=${widget.landlords.length}, '
+      'occupied=$occupied, '
+      'vacant=$vacant, '
+      'maintenance=$maintenance',
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: const Text(

@@ -188,7 +188,6 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
       assignedUnits.where((u) => u.status == 'Under Maintenance').length;
 
   bool _propertySuspended = false;
-  bool _checkingPropertyStatus = true;
 
   Future<void> _loadPropertySuspensionStatus() async {
     final propertyId = widget.landlord.propertyId.trim();
@@ -202,7 +201,6 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
       if (mounted) {
         setState(() {
           _propertySuspended = false;
-          _checkingPropertyStatus = false;
         });
       }
 
@@ -227,7 +225,6 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
 
       setState(() {
         _propertySuspended = suspended;
-        _checkingPropertyStatus = false;
       });
 
       // If the property was suspended while the landlord was
@@ -244,7 +241,6 @@ class _LandlordDashboardPageState extends State<LandlordDashboardPage> {
 
       setState(() {
         _propertySuspended = false;
-        _checkingPropertyStatus = false;
       });
     }
   }
