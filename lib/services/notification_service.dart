@@ -14,16 +14,8 @@ class NotificationService {
 
   Future<void> initialize() async {
     try {
-      final settings = await _messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        provisional: false,
-      );
-
-      debugPrint(
-        'FCM permission status: ${settings.authorizationStatus}',
-      );
+      // Notification permission is requested explicitly by the JUMAA
+      // permission flow, not automatically during app startup.
 
       // Device registration is handled explicitly after authentication.
       // Do not register during startup/session restoration.
@@ -37,6 +29,26 @@ class NotificationService {
       });
     } catch (e) {
       debugPrint('Notification initialization failed: $e');
+    }
+  }
+
+  Future<AuthorizationStatus> requestPermission() async {
+    try {
+      final settings = await _messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
+
+      debugPrint(
+        'FCM permission status: ${settings.authorizationStatus}',
+      );
+
+      return settings.authorizationStatus;
+    } catch (e) {
+      debugPrint('Notification permission request failed: $e');
+      return AuthorizationStatus.denied;
     }
   }
 

@@ -10,6 +10,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'data/kenya_locations.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
@@ -26,6 +27,8 @@ import 'screens/landlord/landlord_dashboard.dart';
 import 'screens/jumaa_owner/jumaa_owner_dashboard.dart';
 import 'services/booking_service.dart';
 import 'services/notification_service.dart';
+import 'services/jumaa_permission_service.dart';
+import 'screens/jumaa_permissions_page.dart';
 import 'firebase_options.dart';
 
 // ============================================================
@@ -377,6 +380,7 @@ class OpenNestAuthGate extends StatefulWidget {
 class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
   bool _loading = true;
   bool _loggedIn = false;
+  bool _showPermissionPage = false;
 
   String? _restoredRole;
 
@@ -386,6 +390,18 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
   void initState() {
     super.initState();
     _checkLogin();
+  }
+
+  Future<void> _preparePermissionPage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final permissionsSeen =
+        prefs.getBool('jumaa_permissions_seen') ?? false;
+
+    if (!mounted) return;
+
+    setState(() {
+      _showPermissionPage = !permissionsSeen;
+    });
   }
 
   Future<void> _checkLogin() async {
@@ -496,6 +512,11 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
 
         if (tenantProfile != null && mounted) {
           _tenantProfile = Map<String, dynamic>.from(tenantProfile);
+
+          await _preparePermissionPage();
+
+          if (!mounted) return;
+
           setState(() {
             _loggedIn = true;
             _loading = false;
@@ -512,10 +533,15 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
         final landlord = await OpenNestStore.loadLandlordProfile();
 
         if (landlord != null && mounted) {
+          await _preparePermissionPage();
+
+          if (!mounted) return;
+
           setState(() {
             _loggedIn = true;
             _loading = false;
           });
+
           return;
         }
       }
@@ -525,10 +551,15 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
       // ----------------------------------------------------------
       if (role == 'jumaa_owner') {
         if (mounted) {
+          await _preparePermissionPage();
+
+          if (!mounted) return;
+
           setState(() {
             _loggedIn = true;
             _loading = false;
           });
+
           return;
         }
       }
@@ -540,10 +571,15 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
         await OpenNestStore.loadOwners();
 
         if (mounted) {
+          await _preparePermissionPage();
+
+          if (!mounted) return;
+
           setState(() {
             _loggedIn = true;
             _loading = false;
           });
+
           return;
         }
       }
@@ -575,6 +611,18 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
     }
   }
 
+  Future<void> _finishPermissionSetup() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setBool('jumaa_permissions_seen', true);
+
+    if (!mounted) return;
+
+    setState(() {
+      _showPermissionPage = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -582,6 +630,12 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
     }
 
     if (_loggedIn) {
+      if (_showPermissionPage) {
+        return JumaaPermissionsPage(
+          onFinished: _finishPermissionSetup,
+        );
+      }
+
       // Restore tenants directly to the tenant dashboard.
       // Supabase keeps the authentication session alive until
       // the user explicitly signs out.
@@ -714,9 +768,7 @@ class _DashboardPageState extends State<DashboardPage> {
         await OpenNestStore.loadOwnerPropertiesFromSupabase();
         await OpenNestStore.loadLandlords();
       } else {
-        debugPrint(
-          'DASHBOARD DATA: skipping owner loaders for role=$role',
-        );
+        debugPrint('DASHBOARD DATA: skipping owner loaders for role=$role');
       }
     } catch (e) {
       debugPrint('Dashboard data reload failed: $e');
@@ -2356,9 +2408,7 @@ class _OwnerApartmentManagementPageState
     final role = profile?['role']?.toString().toLowerCase().trim() ?? '';
 
     if (role != 'owner') {
-      debugPrint(
-        'OWNER APARTMENT PAGE: skipped because role=$role',
-      );
+      debugPrint('OWNER APARTMENT PAGE: skipped because role=$role');
       return;
     }
     if (_loadingOwnerProperty) return;
@@ -2446,11 +2496,7 @@ class _OwnerApartmentManagementPageState
     final currentProperty = property;
 
     if (_loadingOwnerProperty && currentProperty == null) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     if (currentProperty == null) {
@@ -4651,7 +4697,7 @@ class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
       LocationPermission permission = await Geolocator.checkPermission();
 
       if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
+        permission = await JumaaPermissionService.instance.requestLocation();
       }
 
       if (permission == LocationPermission.denied) {
@@ -6039,7 +6085,7 @@ class _ApartmentsPageState extends State<ApartmentsPage> {
                         ),
                         items: availableCounties
                             .map(
-                              (county) => DropdownMenuItem(
+                              (county) => DropdownMenuItem<String>(
                                 value: county,
                                 child: Text(county),
                               ),
@@ -6612,7 +6658,9 @@ class _OwnerPaymentsPageState extends State<OwnerPaymentsPage> {
       final user = OpenNestStore.supabase.auth.currentUser;
 
       if (user == null) {
-        debugPrint('OWNER PAYMENTS: skipped because there is no authenticated user.');
+        debugPrint(
+          'OWNER PAYMENTS: skipped because there is no authenticated user.',
+        );
         return;
       }
 
@@ -6622,8 +6670,7 @@ class _OwnerPaymentsPageState extends State<OwnerPaymentsPage> {
           .eq('id', user.id)
           .maybeSingle();
 
-      final role =
-          profile?['role']?.toString().toLowerCase().trim() ?? '';
+      final role = profile?['role']?.toString().toLowerCase().trim() ?? '';
 
       if (role != 'owner') {
         debugPrint(
@@ -7678,6 +7725,12 @@ class OpenNestStore {
           propertyName: row['property_name']?.toString() ?? '',
           location: row['location']?.toString() ?? '',
           description: row['description']?.toString() ?? '',
+
+          isBoosted: row['is_boosted'] == true,
+          boostExpiresAt: row['boost_expires_at'] != null
+              ? DateTime.tryParse(row['boost_expires_at'].toString())
+              : null,
+          likeCount: int.tryParse(row['like_count']?.toString() ?? '0') ?? 0,
         ),
       );
     }
@@ -7728,9 +7781,7 @@ class OpenNestStore {
       return;
     }
 
-    debugPrint(
-      'OWNER PROPERTIES: loading properties for owner ${user.id}',
-    );
+    debugPrint('OWNER PROPERTIES: loading properties for owner ${user.id}');
 
     final propertyResponse = await supabase
         .from('properties')
@@ -7778,25 +7829,21 @@ class OpenNestStore {
           phone: row['phone']?.toString() ?? '',
           paymentMethod: row['payment_method']?.toString() ?? 'till',
           mpesaTillNumber: row['mpesa_till_number']?.toString() ?? '',
-          mpesaPaybillNumber:
-              row['mpesa_paybill_number']?.toString() ?? '',
-          mpesaAccountNumber:
-              row['mpesa_account_number']?.toString() ?? '',
+          mpesaPaybillNumber: row['mpesa_paybill_number']?.toString() ?? '',
+          mpesaAccountNumber: row['mpesa_account_number']?.toString() ?? '',
           paymentsEnabled: row['payments_enabled'] is bool
               ? row['payments_enabled'] as bool
               : true,
           imagePaths: row['image_paths'] is List
               ? List<String>.from(
-                  (row['image_paths'] as List)
-                      .map((item) => item.toString()),
+                  (row['image_paths'] as List).map((item) => item.toString()),
                 )
               : const [],
         ),
       );
     }
 
-    final propertyIds =
-        ownerProperties.map((property) => property.id).toSet();
+    final propertyIds = ownerProperties.map((property) => property.id).toSet();
 
     final ownerUnits = <Apartment>[];
 
@@ -7832,9 +7879,7 @@ class OpenNestStore {
             type: row['unit_type']?.toString() ?? '',
             rent: row['monthly_rent']?.toString() ?? '0',
             tenant: '',
-            status: _normalizeUnitStatus(
-              row['status']?.toString() ?? 'vacant',
-            ),
+            status: _normalizeUnitStatus(row['status']?.toString() ?? 'vacant'),
             propertyId: propertyId,
             propertyName: property.name,
             location: property.location,
@@ -8238,9 +8283,7 @@ class OpenNestStore {
           .maybeSingle();
 
       if (tenantRow == null) {
-        debugPrint(
-          'TENANT PROFILE: No tenant found for auth user ${user.id}',
-        );
+        debugPrint('TENANT PROFILE: No tenant found for auth user ${user.id}');
         return null;
       }
 
@@ -8291,9 +8334,7 @@ class OpenNestStore {
           } else {
             profile['units'] = null;
 
-            debugPrint(
-              'TENANT UNIT LOAD: No unit found for unit_id=$unitId',
-            );
+            debugPrint('TENANT UNIT LOAD: No unit found for unit_id=$unitId');
           }
         } catch (e) {
           profile['units'] = null;
@@ -9542,8 +9583,7 @@ class _TenantsPageState extends State<TenantsPage> {
           .eq('id', currentUser.id)
           .maybeSingle();
 
-      final role =
-          profile?['role']?.toString().toLowerCase().trim() ?? '';
+      final role = profile?['role']?.toString().toLowerCase().trim() ?? '';
 
       if (role != 'owner') {
         debugPrint(
@@ -11049,9 +11089,7 @@ class _LandlordsPageState extends State<LandlordsPage> {
     final role = profile?['role']?.toString().toLowerCase().trim() ?? '';
 
     if (role != 'owner') {
-      debugPrint(
-        'LANDLORDS PAGE: skipped because role=$role',
-      );
+      debugPrint('LANDLORDS PAGE: skipped because role=$role');
       return;
     }
 
@@ -11918,9 +11956,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Icon(Icons.person, size: 28),
               ),
               title: Text(
-                apartmentName.isNotEmpty
-                    ? apartmentName
-                    : managerName,
+                apartmentName.isNotEmpty ? apartmentName : managerName,
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               subtitle: Text(
@@ -12800,7 +12836,7 @@ class _JUMAAEntryPageState extends State<JUMAAEntryPage> {
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const ApartmentsPage()),
+                      MaterialPageRoute(builder: (_) => const PublicUserPage()),
                     );
                   },
                 ),
@@ -13411,7 +13447,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       LocationPermission permission = await Geolocator.checkPermission();
 
       if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
+        permission = await JumaaPermissionService.instance.requestLocation();
       }
 
       if (permission == LocationPermission.denied) {
@@ -15202,10 +15238,10 @@ class _PropertyImageCarouselState extends State<_PropertyImageCarousel> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 118,
-      width: 105,
+      height: 220,
+      width: double.infinity,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(0),
+        borderRadius: BorderRadius.circular(18),
         child: Stack(
           children: [
             PageView.builder(
@@ -15254,11 +15290,627 @@ class _PropertyImageCarouselState extends State<_PropertyImageCarousel> {
   }
 }
 
+
+class _PublicPropertyListing {
+  final Property property;
+  final List<Apartment> vacantUnits;
+
+  _PublicPropertyListing({
+    required this.property,
+    required this.vacantUnits,
+  });
+
+  int get vacantCount => vacantUnits.length;
+
+  int get likeCount {
+    if (vacantUnits.isEmpty) return 0;
+
+    return vacantUnits
+        .map((unit) => unit.likeCount)
+        .fold<int>(
+          0,
+          (highest, value) => value > highest ? value : highest,
+        );
+  }
+
+  bool get isLiked {
+    return vacantUnits.any((unit) => unit.isLiked);
+  }
+
+  bool get isBoosted {
+    return vacantUnits.any((unit) => unit.boostIsActive);
+  }
+
+  DateTime? get boostExpiresAt {
+    DateTime? latest;
+
+    for (final unit in vacantUnits) {
+      if (!unit.boostIsActive || unit.boostExpiresAt == null) {
+        continue;
+      }
+
+      if (latest == null || unit.boostExpiresAt!.isAfter(latest)) {
+        latest = unit.boostExpiresAt;
+      }
+    }
+
+    return latest;
+  }
+
+  String get lowestRent {
+    if (vacantUnits.isEmpty) return '0';
+
+    double? lowest;
+
+    for (final unit in vacantUnits) {
+      final cleaned = unit.rent
+          .replaceAll(',', '')
+          .replaceAll('KSh', '')
+          .replaceAll('KES', '')
+          .trim();
+
+      final value = double.tryParse(cleaned);
+
+      if (value == null) continue;
+
+      if (lowest == null || value < lowest) {
+        lowest = value;
+      }
+    }
+
+    if (lowest == null) {
+      return vacantUnits.first.rent;
+    }
+
+    return lowest.roundToDouble() == lowest
+        ? lowest.toInt().toString()
+        : lowest.toStringAsFixed(0);
+  }
+
+  List<String> get unitTypes {
+    final types = <String>{};
+
+    for (final unit in vacantUnits) {
+      final type = unit.type.trim();
+
+      if (type.isNotEmpty) {
+        types.add(type);
+      }
+    }
+
+    return types.toList();
+  }
+}
+
 class PublicUserPage extends StatefulWidget {
   const PublicUserPage({super.key});
 
   @override
   State<PublicUserPage> createState() => _PublicUserPageState();
+}
+
+
+class PublicPropertyRoutePage extends StatefulWidget {
+  final Property property;
+
+  const PublicPropertyRoutePage({
+    super.key,
+    required this.property,
+  });
+
+  @override
+  State<PublicPropertyRoutePage> createState() =>
+      _PublicPropertyRoutePageState();
+}
+
+class _PublicPropertyRoutePageState
+    extends State<PublicPropertyRoutePage> {
+  Position? _currentPosition;
+  double? _distanceMeters;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRoute();
+  }
+
+  Future<void> _loadRoute() async {
+    final property = widget.property;
+    final latitude = property.latitude;
+    final longitude = property.longitude;
+
+    if (latitude == null || longitude == null) {
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+        _error = 'This property does not have a GPS location yet.';
+      });
+
+      return;
+    }
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+      if (!serviceEnabled) {
+        if (!mounted) return;
+
+        setState(() {
+          _loading = false;
+          _error =
+              'Location/GPS is turned off. Please enable it and try again.';
+        });
+
+        return;
+      }
+
+      LocationPermission permission =
+          await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission = await JumaaPermissionService.instance.requestLocation();
+      }
+
+      if (permission == LocationPermission.denied) {
+        if (!mounted) return;
+
+        setState(() {
+          _loading = false;
+          _error = 'Location permission was denied.';
+        });
+
+        return;
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+
+        setState(() {
+          _loading = false;
+          _error =
+              'Location permission is permanently denied. Enable it in app settings.';
+        });
+
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+
+      final distance = Geolocator.distanceBetween(
+        position.latitude,
+        position.longitude,
+        latitude,
+        longitude,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _currentPosition = position;
+        _distanceMeters = distance;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+        _error = 'Could not get your current location.';
+      });
+
+      debugPrint('PUBLIC ROUTE LOCATION ERROR: $e');
+    }
+  }
+
+  String _distanceText() {
+    final distance = _distanceMeters;
+
+    if (distance == null) {
+      return '--';
+    }
+
+    if (distance >= 1000) {
+      return '${(distance / 1000).toStringAsFixed(1)} km';
+    }
+
+    return '${distance.round()} m';
+  }
+
+  Future<void> _openGoogleMaps() async {
+    final position = _currentPosition;
+    final latitude = widget.property.latitude;
+    final longitude = widget.property.longitude;
+
+    if (position == null || latitude == null || longitude == null) {
+      return;
+    }
+
+    final mapsUrl = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1'
+      '&origin=${position.latitude},${position.longitude}'
+      '&destination=$latitude,$longitude'
+      '&travelmode=driving',
+    );
+
+    final launched = await launchUrl(
+      mapsUrl,
+      mode: LaunchMode.externalApplication,
+    );
+
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open Google Maps.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final property = widget.property;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Directions',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        centerTitle: true,
+      ),
+      body: _loading
+          ? const Center(
+              child: CircularProgressIndicator(),
+            )
+          : RefreshIndicator(
+              onRefresh: _loadRoute,
+              child: ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withValues(alpha: 0.95),
+                          Theme.of(context)
+                              .colorScheme
+                              .secondary
+                              .withValues(alpha: 0.85),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.route_rounded,
+                          color: Colors.white,
+                          size: 42,
+                        ),
+                        SizedBox(height: 14),
+                        Text(
+                          'Find your way to this apartment',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 23,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          'JUMAA will use your current location to '
+                          'create a route to the property.',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  Card(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Destination',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.black54,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            property.name,
+                            style: const TextStyle(
+                              fontSize: 21,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            [
+                              property.location,
+                              property.subcounty,
+                              property.county,
+                            ].where((value) => value.trim().isNotEmpty).join(
+                                  ', ',
+                                ),
+                            style: const TextStyle(
+                              color: Colors.black54,
+                              height: 1.4,
+                            ),
+                          ),
+                          if (property.address.trim().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              property.address,
+                              style: const TextStyle(
+                                color: Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  if (_error != null)
+                    Card(
+                      color: Colors.orange.shade50,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.location_off_rounded,
+                              color: Colors.orange.shade800,
+                              size: 38,
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              _error!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            OutlinedButton.icon(
+                              onPressed: _loadRoute,
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('TRY AGAIN'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else ...[
+                    Card(
+                      elevation: 1,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withValues(
+                                      alpha: 0.10,
+                                    ),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.my_location_rounded,
+                                    color: Colors.blue,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                const Expanded(
+                                  child: Text(
+                                    'Your current location',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Icon(
+                                Icons.arrow_downward_rounded,
+                                size: 28,
+                              ),
+                            ),
+
+                            Row(
+                              children: [
+                                Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withValues(
+                                      alpha: 0.10,
+                                    ),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.home_rounded,
+                                    color: Colors.red,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Text(
+                                    property.name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 20),
+
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.straighten_rounded),
+                                  const SizedBox(width: 12),
+                                  const Expanded(
+                                    child: Text(
+                                      'Approx. distance',
+                                      style: TextStyle(
+                                        color: Colors.black54,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    _distanceText(),
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.info_outline_rounded,
+                            color: Colors.blue,
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'The distance above is a straight-line '
+                              'estimate. Google Maps will calculate the '
+                              'actual road route, driving distance and '
+                              'travel time.',
+                              style: TextStyle(
+                                color: Colors.black87,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _openGoogleMaps,
+                        icon: const Icon(
+                          Icons.directions_rounded,
+                        ),
+                        label: const Text(
+                          'SHOW ROUTE TO APARTMENT',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 17,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _loadRoute,
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('REFRESH MY LOCATION'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 15,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+    );
+  }
 }
 
 class _PublicUserPageState extends State<PublicUserPage> {
@@ -15267,6 +15919,17 @@ class _PublicUserPageState extends State<PublicUserPage> {
   String _search = '';
   bool _loadingApartments = true;
   String? _loadError;
+
+  String? _selectedCounty;
+  String? _selectedSubcounty;
+  String? _selectedHouseType;
+
+  double? _minRent;
+  double? _maxRent;
+
+  bool _boostedOnly = false;
+  bool _mostLikedFirst = false;
+  bool _lowestRentFirst = false;
 
   @override
   void initState() {
@@ -15321,45 +15984,628 @@ class _PublicUserPageState extends State<PublicUserPage> {
     super.dispose();
   }
 
-  List<Apartment> get _apartments {
-    for (final unit in OpenNestStore.apartments) {
-      debugPrint(
-        'PUBLIC FILTER UNIT: '
-        'number=${unit.number} '
-        'propertyId=${unit.propertyId} '
-        'property=${unit.propertyName} '
-        'status=${unit.status}',
+  double? _parseRent(String value) {
+    final cleaned = value
+        .replaceAll(',', '')
+        .replaceAll('KSh', '')
+        .replaceAll('KES', '')
+        .trim();
+
+    return double.tryParse(cleaned);
+  }
+
+  bool get _hasMarketplaceFilters {
+    return _selectedCounty != null ||
+        _selectedSubcounty != null ||
+        _selectedHouseType != null ||
+        _minRent != null ||
+        _maxRent != null ||
+        _boostedOnly ||
+        _mostLikedFirst ||
+        _lowestRentFirst;
+  }
+
+  void _clearMarketplaceFilters() {
+    setState(() {
+      _selectedCounty = null;
+      _selectedSubcounty = null;
+      _selectedHouseType = null;
+      _minRent = null;
+      _maxRent = null;
+      _boostedOnly = false;
+      _mostLikedFirst = false;
+      _lowestRentFirst = false;
+    });
+  }
+
+  Future<void> _openMarketplaceFilters() async {
+    String? county = _selectedCounty;
+    String? subcounty = _selectedSubcounty;
+    String? houseType = _selectedHouseType;
+
+    final minRentController = TextEditingController(
+      text: _minRent?.toStringAsFixed(0) ?? '',
+    );
+
+    final maxRentController = TextEditingController(
+      text: _maxRent?.toStringAsFixed(0) ?? '',
+    );
+
+    bool boostedOnly = _boostedOnly;
+    bool mostLikedFirst = _mostLikedFirst;
+    bool lowestRentFirst = _lowestRentFirst;
+
+    final counties = kenyaCountiesAndSubcounties.keys.toList()..sort();
+
+    final houseTypes = OpenNestStore.apartments
+        .where((a) => a.status.toLowerCase() == 'vacant')
+        .map((a) => a.type.trim())
+        .where((v) => v.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final filteredSubcounties = county == null
+                ? <String>[]
+                : (kenyaCountiesAndSubcounties[county] ??
+                        <String>[])
+                    .toList()
+                  ..sort();
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.82,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(28),
+                ),
+              ),
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 18, 12, 8),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0B3D2E)
+                                  .withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(
+                              Icons.tune_rounded,
+                              color: Color(0xFF0B3D2E),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'Filter Apartments',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.pop(sheetContext),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const Divider(),
+
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                        children: [
+                          const Text(
+                            'LOCATION',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black54,
+                              letterSpacing: 1,
+                            ),
+                          ),
+
+                          const SizedBox(height: 10),
+
+                          DropdownButtonFormField<String>(
+                            initialValue: county,
+                            decoration: InputDecoration(
+                              labelText: 'County',
+                              prefixIcon:
+                                  const Icon(Icons.location_city_rounded),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            items: [
+                              const DropdownMenuItem<String>(
+                                value: null,
+                                child: Text('All counties'),
+                              ),
+                              ...counties.map(
+                                (value) => DropdownMenuItem<String>(
+                                  value: value,
+                                  child: Text(value),
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              setSheetState(() {
+                                county = value;
+                                subcounty = null;
+                              });
+                            },
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          DropdownButtonFormField<String>(
+                            initialValue: subcounty,
+                            decoration: InputDecoration(
+                              labelText: 'Subcounty',
+                              prefixIcon:
+                                  const Icon(Icons.map_rounded),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            items: [
+                              const DropdownMenuItem<String>(
+                                value: null,
+                                child: Text('All subcounties'),
+                              ),
+                              ...filteredSubcounties.map(
+                                (value) => DropdownMenuItem<String>(
+                                  value: value,
+                                  child: Text(value),
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              setSheetState(() {
+                                subcounty = value;
+                              });
+                            },
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          const Text(
+                            'APARTMENT',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black54,
+                              letterSpacing: 1,
+                            ),
+                          ),
+
+                          const SizedBox(height: 10),
+
+                          DropdownButtonFormField<String>(
+                            initialValue: houseType,
+                            decoration: InputDecoration(
+                              labelText: 'House type',
+                              prefixIcon:
+                                  const Icon(Icons.home_work_rounded),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            items: [
+                              const DropdownMenuItem<String>(
+                                value: null,
+                                child: Text('All house types'),
+                              ),
+                              ...houseTypes.map(
+                                (value) => DropdownMenuItem<String>(
+                                  value: value,
+                                  child: Text(value),
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              setSheetState(() {
+                                houseType = value;
+                              });
+                            },
+                          ),
+
+                          const SizedBox(height: 20),
+
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: minRentController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: 'Min rent',
+                                    prefixText: 'KSh ',
+                                    border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextField(
+                                  controller: maxRentController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: 'Max rent',
+                                    prefixText: 'KSh ',
+                                    border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          const Text(
+                            'SORT & PROMOTION',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black54,
+                              letterSpacing: 1,
+                            ),
+                          ),
+
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Boosted apartments only',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            subtitle: const Text(
+                              'Show currently promoted properties',
+                            ),
+                            secondary: const Icon(
+                              Icons.local_fire_department_rounded,
+                              color: Colors.deepOrange,
+                            ),
+                            value: boostedOnly,
+                            onChanged: (value) {
+                              setSheetState(() {
+                                boostedOnly = value;
+                              });
+                            },
+                          ),
+
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Most liked first',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            secondary: const Icon(
+                              Icons.favorite_rounded,
+                              color: Colors.red,
+                            ),
+                            value: mostLikedFirst,
+                            onChanged: (value) {
+                              setSheetState(() {
+                                mostLikedFirst = value;
+                                if (value) {
+                                  lowestRentFirst = false;
+                                }
+                              });
+                            },
+                          ),
+
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Lowest rent first',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            secondary: const Icon(
+                              Icons.payments_rounded,
+                              color: Colors.green,
+                            ),
+                            value: lowestRentFirst,
+                            onChanged: (value) {
+                              setSheetState(() {
+                                lowestRentFirst = value;
+                                if (value) {
+                                  mostLikedFirst = false;
+                                }
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                county = null;
+                                subcounty = null;
+                                houseType = null;
+                                minRentController.clear();
+                                maxRentController.clear();
+                                boostedOnly = false;
+                                mostLikedFirst = false;
+                                lowestRentFirst = false;
+
+                                setSheetState(() {});
+                              },
+                              style: OutlinedButton.styleFrom(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text('RESET'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 2,
+                            child: FilledButton(
+                              onPressed: () {
+                                final min =
+                                    double.tryParse(
+                                      minRentController.text.trim(),
+                                    );
+
+                                final max =
+                                    double.tryParse(
+                                      maxRentController.text.trim(),
+                                    );
+
+                                Navigator.pop(sheetContext);
+
+                                if (!mounted) return;
+
+                                setState(() {
+                                  _selectedCounty = county;
+                                  _selectedSubcounty = subcounty;
+                                  _selectedHouseType = houseType;
+                                  _minRent = min;
+                                  _maxRent = max;
+                                  _boostedOnly = boostedOnly;
+                                  _mostLikedFirst = mostLikedFirst;
+                                  _lowestRentFirst = lowestRentFirst;
+                                });
+                              },
+                              style: FilledButton.styleFrom(
+                                backgroundColor:
+                                    const Color(0xFF0B3D2E),
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text(
+                                'APPLY FILTERS',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    minRentController.dispose();
+    maxRentController.dispose();
+  }
+
+  List<_PublicPropertyListing> get _properties {
+    final grouped = <String, List<Apartment>>{};
+
+    for (final apartment in OpenNestStore.apartments) {
+      if (apartment.status.toLowerCase() != 'vacant') {
+        continue;
+      }
+
+      final propertyId = apartment.propertyId.trim();
+
+      if (propertyId.isEmpty) {
+        continue;
+      }
+
+      if (_search.isNotEmpty) {
+        Property? property;
+
+        for (final item in OpenNestStore.properties) {
+          if (item.id == propertyId) {
+            property = item;
+            break;
+          }
+        }
+
+        final propertyMatches =
+            property != null &&
+            (
+              property.name.toLowerCase().contains(_search) ||
+              property.county.toLowerCase().contains(_search) ||
+              property.subcounty.toLowerCase().contains(_search) ||
+              property.location.toLowerCase().contains(_search) ||
+              property.address.toLowerCase().contains(_search) ||
+              property.description.toLowerCase().contains(_search)
+            );
+
+        final unitMatches =
+            apartment.number.toLowerCase().contains(_search) ||
+            apartment.type.toLowerCase().contains(_search) ||
+            apartment.rent.toLowerCase().contains(_search) ||
+            apartment.location.toLowerCase().contains(_search);
+
+        if (!propertyMatches && !unitMatches) {
+          continue;
+        }
+      }
+
+      Property? filterProperty;
+
+      for (final item in OpenNestStore.properties) {
+        if (item.id == propertyId) {
+          filterProperty = item;
+          break;
+        }
+      }
+
+      if (filterProperty == null) {
+        continue;
+      }
+
+      if (_selectedCounty != null &&
+          filterProperty.county != _selectedCounty) {
+        continue;
+      }
+
+      if (_selectedSubcounty != null &&
+          filterProperty.subcounty != _selectedSubcounty) {
+        continue;
+      }
+
+      if (_selectedHouseType != null &&
+          !apartment.type
+              .trim()
+              .toLowerCase()
+              .contains(_selectedHouseType!.toLowerCase())) {
+        continue;
+      }
+
+      final rent = _parseRent(apartment.rent);
+
+      if (_minRent != null && (rent == null || rent < _minRent!)) {
+        continue;
+      }
+
+      if (_maxRent != null && (rent == null || rent > _maxRent!)) {
+        continue;
+      }
+
+      if (_boostedOnly && !apartment.boostIsActive) {
+        continue;
+      }
+
+      grouped
+          .putIfAbsent(propertyId, () => <Apartment>[])
+          .add(apartment);
+    }
+
+    final listings = <_PublicPropertyListing>[];
+
+    for (final entry in grouped.entries) {
+      Property? property;
+
+      for (final item in OpenNestStore.properties) {
+        if (item.id == entry.key) {
+          property = item;
+          break;
+        }
+      }
+
+      if (property == null) {
+        continue;
+      }
+
+      listings.add(
+        _PublicPropertyListing(
+          property: property,
+          vacantUnits: entry.value,
+        ),
       );
     }
 
-    final results = OpenNestStore.apartments.where((apartment) {
-      // Only vacant units are publicly available.
-      if (apartment.status.toLowerCase() != 'vacant') {
-        return false;
+    listings.sort((a, b) {
+      if (a.isBoosted && !b.isBoosted) {
+        return -1;
       }
 
-      if (_search.isEmpty) return true;
+      if (!a.isBoosted && b.isBoosted) {
+        return 1;
+      }
 
-      return apartment.number.toLowerCase().contains(_search) ||
-          apartment.type.toLowerCase().contains(_search) ||
-          apartment.rent.toLowerCase().contains(_search) ||
-          apartment.propertyName.toLowerCase().contains(_search) ||
-          apartment.location.toLowerCase().contains(_search);
-    }).toList();
+      if (_mostLikedFirst) {
+        final likeComparison = b.likeCount.compareTo(a.likeCount);
 
-    // Boosted listings first.
-    results.sort((a, b) {
-      if (a.isBoosted && !b.isBoosted) return -1;
-      if (!a.isBoosted && b.isBoosted) return 1;
-      return 0;
+        if (likeComparison != 0) {
+          return likeComparison;
+        }
+      }
+
+      if (_lowestRentFirst) {
+        final aRent = _parseRent(a.lowestRent) ?? double.infinity;
+        final bRent = _parseRent(b.lowestRent) ?? double.infinity;
+
+        final rentComparison = aRent.compareTo(bRent);
+
+        if (rentComparison != 0) {
+          return rentComparison;
+        }
+      }
+
+      if (!_mostLikedFirst && !_lowestRentFirst) {
+        final likeComparison = b.likeCount.compareTo(a.likeCount);
+
+        if (likeComparison != 0) {
+          return likeComparison;
+        }
+      }
+
+      return a.property.name.toLowerCase().compareTo(
+            b.property.name.toLowerCase(),
+          );
     });
 
-    return results;
+    return listings;
   }
 
   @override
   Widget build(BuildContext context) {
-    final apartments = _apartments;
+    final properties = _properties;
 
     return Scaffold(
       appBar: AppBar(
@@ -15413,10 +16659,168 @@ class _PublicUserPageState extends State<PublicUserPage> {
               ),
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
+
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF0B3D2E)
+                              .withValues(alpha: 0.16),
+                          blurRadius: 14,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(18),
+                      child: InkWell(
+                        onTap: _openMarketplaceFilters,
+                        borderRadius: BorderRadius.circular(18),
+                        child: Ink(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          decoration: BoxDecoration(
+                            gradient: _hasMarketplaceFilters
+                                ? const LinearGradient(
+                                    colors: [
+                                      Color(0xFF2563EB),
+                                      Color(0xFF7C3AED),
+                                      Color(0xFFDB2777),
+                                    ],
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.centerRight,
+                                  )
+                                : const LinearGradient(
+                                    colors: [
+                                      Color(0xFF2563EB),
+                                      Color(0xFF4F46E5),
+                                      Color(0xFF9333EA),
+                                    ],
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.centerRight,
+                                  ),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 42,
+                                height: 42,
+                                decoration: BoxDecoration(
+                                  color: _hasMarketplaceFilters
+                                      ? Colors.white
+                                          .withValues(alpha: 0.16)
+                                      : const Color(0xFF0B3D2E)
+                                          .withValues(alpha: 0.09),
+                                  borderRadius: BorderRadius.circular(13),
+                                ),
+                                child: Icon(
+                                  Icons.tune_rounded,
+                                  color: Colors.white,
+                                  size: 23,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _hasMarketplaceFilters
+                                          ? 'FILTERS ACTIVE'
+                                          : 'FILTER APARTMENTS',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 0.3,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      _hasMarketplaceFilters
+                                          ? 'Tap to change your filters'
+                                          : 'Find apartments that match you',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w500,
+                                        color: _hasMarketplaceFilters
+                                            ? Colors.white
+                                                .withValues(alpha: 0.82)
+                                            : Colors.black54,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: _hasMarketplaceFilters
+                                      ? Colors.white
+                                          .withValues(alpha: 0.14)
+                                      : const Color(0xFF0B3D2E)
+                                          .withValues(alpha: 0.07),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.arrow_forward_ios_rounded,
+                                  size: 15,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (_hasMarketplaceFilters) ...[
+                  const SizedBox(width: 10),
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _clearMarketplaceFilters,
+                      borderRadius: BorderRadius.circular(16),
+                      child: Ink(
+                        width: 52,
+                        height: 70,
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.07),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.18),
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.close_rounded,
+                          color: Colors.red,
+                          size: 23,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+
+            const SizedBox(height: 14),
 
             Text(
-              '${apartments.length} apartment${apartments.length == 1 ? '' : 's'} found',
+              '${properties.length} propert${properties.length == 1 ? 'y' : 'ies'} found',
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
 
@@ -15469,7 +16873,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                         ),
                       ),
                     )
-                  : apartments.isEmpty
+                  : properties.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -15496,9 +16900,9 @@ class _PublicUserPageState extends State<PublicUserPage> {
                       ),
                     )
                   : ListView.builder(
-                      itemCount: apartments.length,
+                      itemCount: properties.length,
                       itemBuilder: (context, index) {
-                        return _apartmentCard(apartments[index]);
+                        return _propertyCard(properties[index]);
                       },
                     ),
             ),
@@ -15508,154 +16912,422 @@ class _PublicUserPageState extends State<PublicUserPage> {
     );
   }
 
-  Widget _apartmentCard(Apartment apartment) {
+  Future<String> _getAnonymousVisitorId() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    const key = 'jumaa_anonymous_like_id';
+
+    final existing = prefs.getString(key);
+
+    if (existing != null && existing.trim().isNotEmpty) {
+      return existing;
+    }
+
+    final now = DateTime.now().microsecondsSinceEpoch;
+    final randomPart =
+        DateTime.now().millisecondsSinceEpoch.remainder(1000000);
+
+    final anonymousId = 'visitor_${now}_$randomPart';
+
+    await prefs.setString(key, anonymousId);
+
+    return anonymousId;
+  }
+
+  Future<void> _togglePropertyLike(Apartment apartment) async {
+    final userId = OpenNestStore.supabase.auth.currentUser?.id;
+    final propertyId = apartment.propertyId.trim();
+
+    if (propertyId.isEmpty) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This property is missing its property information.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    final anonymousId =
+        userId == null ? await _getAnonymousVisitorId() : null;
+
+    final propertyApartments = OpenNestStore.apartments
+        .where((unit) => unit.propertyId == propertyId)
+        .toList();
+
+    final currentlyLiked = apartment.isLiked;
+
+    for (final unit in propertyApartments) {
+      unit.isLiked = !currentlyLiked;
+
+      unit.likeCount = currentlyLiked
+          ? (unit.likeCount > 0 ? unit.likeCount - 1 : 0)
+          : unit.likeCount + 1;
+    }
+
+    if (mounted) {
+      setState(() {});
+    }
+
+    try {
+      if (currentlyLiked) {
+        final query = OpenNestStore.supabase
+            .from('property_likes')
+            .delete()
+            .eq('property_id', propertyId);
+
+        if (userId != null) {
+          await query.eq('user_id', userId);
+        } else {
+          await query.eq('anonymous_id', anonymousId!);
+        }
+      } else {
+        final payload = <String, dynamic>{
+          'property_id': propertyId,
+        };
+
+        if (userId != null) {
+          payload['user_id'] = userId;
+        } else {
+          payload['anonymous_id'] = anonymousId;
+        }
+
+        await OpenNestStore.supabase
+            .from('property_likes')
+            .insert(payload);
+      }
+
+      debugPrint(
+        'PUBLIC PROPERTY LIKE UPDATED: '
+        'property=$propertyId '
+        'liked=${!currentlyLiked} '
+        'identity=${userId != null ? 'authenticated' : 'anonymous'}',
+      );
+    } catch (e) {
+      debugPrint('PUBLIC PROPERTY LIKE ERROR: $e');
+
+      for (final unit in propertyApartments) {
+        unit.isLiked = currentlyLiked;
+
+        unit.likeCount = currentlyLiked
+            ? unit.likeCount + 1
+            : (unit.likeCount > 0 ? unit.likeCount - 1 : 0);
+      }
+
+      if (mounted) {
+        setState(() {});
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not update your like. Please try again.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _propertyCard(_PublicPropertyListing listing) {
+    final property = listing.property;
+
+    final images = <String>[
+      ...property.imagePaths,
+      ...listing.vacantUnits.expand((unit) => unit.imagePaths),
+    ].where((image) => image.trim().isNotEmpty).toSet().toList();
+
     return Card(
-      margin: const EdgeInsets.only(bottom: 14),
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 58,
-                  height: 58,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8F3EE),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(
-                    Icons.apartment,
-                    color: Color(0xFF0B3D2E),
-                    size: 30,
-                  ),
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (images.isNotEmpty)
+            _PropertyImageCarousel(
+              images: images,
+              placeholder: Container(
+                height: 190,
+                width: double.infinity,
+                color: const Color(0xFFE8F3EE),
+                child: const Icon(
+                  Icons.apartment,
+                  size: 60,
+                  color: Color(0xFF0B3D2E),
                 ),
+              ),
+            )
+          else
+            Container(
+              height: 190,
+              width: double.infinity,
+              color: const Color(0xFFE8F3EE),
+              child: const Icon(
+                Icons.apartment,
+                size: 60,
+                color: Color(0xFF0B3D2E),
+              ),
+            ),
 
-                const SizedBox(width: 14),
-
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              apartment.number,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-
-                          if (apartment.isBoosted)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.shade100,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Text(
-                                'BOOSTED',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 4),
-
-                      Text(apartment.type),
-
-                      const SizedBox(height: 4),
-
-                      Text(
-                        apartment.rent,
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        property.name,
                         style: const TextStyle(
+                          fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF0B3D2E),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+
+                    if (listing.isBoosted)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade100,
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.local_fire_department,
+                              size: 14,
+                              color: Colors.deepOrange,
+                            ),
+                            SizedBox(width: 3),
+                            Text(
+                              'BOOSTED',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.deepOrange,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
-              ],
-            ),
 
-            const SizedBox(height: 14),
+                const SizedBox(height: 8),
 
-            Row(
-              children: [
-                const Icon(
-                  Icons.location_on_outlined,
-                  size: 19,
-                  color: Colors.grey,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    apartment.location.isEmpty
-                        ? 'Location not provided'
-                        : apartment.location,
-                    style: const TextStyle(color: Colors.black54),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: apartment.status == 'Vacant'
-                    ? Colors.green.shade50
-                    : Colors.red.shade50,
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Text(
-                apartment.status,
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: apartment.status == 'Vacant'
-                      ? Colors.green.shade700
-                      : Colors.red.shade700,
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 12),
-
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        apartment.location.isEmpty
-                            ? 'No location has been added yet.'
-                            : 'Location: ${apartment.location}',
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.location_on_outlined,
+                      size: 18,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        property.location.isNotEmpty
+                            ? property.location
+                            : property.address.isNotEmpty
+                                ? property.address
+                                : 'Location not provided',
+                        style: const TextStyle(
+                          color: Colors.black54,
+                        ),
                       ),
                     ),
-                  );
-                },
-                icon: const Icon(Icons.location_on_outlined),
-                label: const Text('View Location'),
-              ),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _propertyInfoChip(
+                      Icons.home_work_outlined,
+                      '${listing.vacantCount} vacant '
+                      '${listing.vacantCount == 1 ? 'unit' : 'units'}',
+                    ),
+                    _propertyInfoChip(
+                      Icons.payments_outlined,
+                      'From KSh ${listing.lowestRent}',
+                    ),
+                  ],
+                ),
+
+                if (listing.unitTypes.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    listing.unitTypes.join(' • '),
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+
+                if (property.description.trim().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    property.description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 14),
+
+                Row(
+                  children: [
+                    InkWell(
+                      onTap: listing.vacantUnits.isEmpty
+                          ? null
+                          : () => _togglePropertyLike(
+                                listing.vacantUnits.first,
+                              ),
+                      borderRadius: BorderRadius.circular(22),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: listing.isLiked
+                              ? Colors.red.withValues(alpha: 0.10)
+                              : Colors.grey.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: listing.isLiked
+                                ? Colors.red.withValues(alpha: 0.35)
+                                : Colors.grey.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              listing.isLiked
+                                  ? Icons.favorite
+                                  : Icons.favorite_border,
+                              size: 21,
+                              color: listing.isLiked
+                                  ? Colors.red
+                                  : Colors.grey.shade700,
+                            ),
+                            const SizedBox(width: 7),
+                            Text(
+                              '${listing.likeCount} '
+                              '${listing.likeCount == 1 ? 'like' : 'likes'}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: listing.isLiked
+                                    ? Colors.red
+                                    : Colors.grey.shade800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PublicPropertyRoutePage(
+                              property: property,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.location_on_outlined),
+                      label: const Text('Location'),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 10),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PublicPropertyDetailsPage(
+                            property: property,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.visibility_outlined),
+                    label: const Text('VIEW APARTMENT'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0B3D2E),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _propertyInfoChip(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 7,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F7F4),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: const Color(0xFF0B3D2E),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -15691,6 +17363,33 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _navigateAfterLogin(Widget destination) async {
+    final prefs = await SharedPreferences.getInstance();
+    final permissionsSeen =
+        prefs.getBool('jumaa_permissions_seen') ?? false;
+
+    if (!mounted) return;
+
+    if (!permissionsSeen) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JumaaPermissionsPage(
+            destinationBuilder: (_) => destination,
+          ),
+        ),
+      );
+      return;
+    }
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => destination,
+      ),
+    );
   }
 
   Future<void> _login() async {
@@ -15875,32 +17574,29 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
           return;
         }
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => LandlordDashboardPage(
-              landlord: landlord,
-              isDarkMode: Theme.of(context).brightness == Brightness.dark,
-              onDarkModeChanged: (enabled) {
-                final state = context
-                    .findAncestorStateOfType<_ApartmentAppState>();
+        final landlordDashboard = LandlordDashboardPage(
+          landlord: landlord,
+          isDarkMode: Theme.of(context).brightness == Brightness.dark,
+          onDarkModeChanged: (enabled) {
+            final state = context
+                .findAncestorStateOfType<_ApartmentAppState>();
 
-                state?._setDarkMode(enabled);
-              },
-              onLogout: () async {
-                await OpenNestStore.supabase.auth.signOut();
+            state?._setDarkMode(enabled);
+          },
+          onLogout: () async {
+            await OpenNestStore.supabase.auth.signOut();
 
-                if (!mounted) return;
+            if (!mounted) return;
 
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (_) => const JUMAAWelcomePage()),
-                  (route) => false,
-                );
-              },
-            ),
-          ),
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const JUMAAWelcomePage()),
+              (route) => false,
+            );
+          },
         );
+
+        await _navigateAfterLogin(landlordDashboard);
 
         return;
       }
@@ -15937,12 +17633,10 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
           _isLoggingIn = false;
         });
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => TenantDashboardPage(tenantProfile: tenantProfile),
-          ),
-        );
+        final tenantDashboard =
+            TenantDashboardPage(tenantProfile: tenantProfile);
+
+        await _navigateAfterLogin(tenantDashboard);
 
         return;
       }
@@ -15962,10 +17656,9 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
 
         if (!mounted) return;
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const JumaaOwnerDashboard()),
-        );
+        const jumaaOwnerDashboard = JumaaOwnerDashboard();
+
+        await _navigateAfterLogin(jumaaOwnerDashboard);
 
         return;
       }
@@ -15992,20 +17685,17 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
           _isLoggingIn = false;
         });
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => DashboardPage(
-              isDarkMode: Theme.of(context).brightness == Brightness.dark,
-              onDarkModeChanged: (enabled) {
-                final state = context
-                    .findAncestorStateOfType<_ApartmentAppState>();
+        final ownerDashboard = DashboardPage(
+          isDarkMode: Theme.of(context).brightness == Brightness.dark,
+          onDarkModeChanged: (enabled) {
+            final state = context
+                .findAncestorStateOfType<_ApartmentAppState>();
 
-                state?._setDarkMode(enabled);
-              },
-            ),
-          ),
+            state?._setDarkMode(enabled);
+          },
         );
+
+        await _navigateAfterLogin(ownerDashboard);
 
         return;
       }
@@ -16980,8 +18670,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       debugPrint('MESSAGING: current user = $_currentUserId');
       debugPrint('MESSAGING: auth role = ${user?.userMetadata?['role']}');
 
-      final role =
-          user?.userMetadata?['role']?.toString().toLowerCase() ?? '';
+      final role = user?.userMetadata?['role']?.toString().toLowerCase() ?? '';
 
       /*
        * OWNER MESSAGING
@@ -17002,8 +18691,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
             .select('id, name, landlord_id')
             .eq('owner_id', _currentUserId);
 
-        final properties =
-            List<Map<String, dynamic>>.from(propertyRows);
+        final properties = List<Map<String, dynamic>>.from(propertyRows);
 
         debugPrint(
           'OWNER MESSAGES: found ${properties.length} owned properties',
@@ -17012,19 +18700,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
         if (properties.isNotEmpty) {
           // The current owner dashboard is property-focused.
           // Keep the first owned property as the default chat property.
-          _ownerPropertyId =
-              properties.first['id']?.toString();
+          _ownerPropertyId = properties.first['id']?.toString();
 
           final landlordIds = properties
-              .map((property) =>
-                  property['landlord_id']?.toString() ?? '')
+              .map((property) => property['landlord_id']?.toString() ?? '')
               .where((id) => id.isNotEmpty)
               .toSet()
               .toList();
 
-          debugPrint(
-            'OWNER MESSAGES: landlord IDs = $landlordIds',
-          );
+          debugPrint('OWNER MESSAGES: landlord IDs = $landlordIds');
 
           if (landlordIds.isNotEmpty) {
             final landlordRows = await OpenNestStore.supabase
@@ -17033,37 +18717,27 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 .inFilter('id', landlordIds);
 
             for (final property in properties) {
-              final landlordId =
-                  property['landlord_id']?.toString() ?? '';
+              final landlordId = property['landlord_id']?.toString() ?? '';
 
               if (landlordId.isEmpty) continue;
 
-              final matchingLandlords =
-                  landlordRows.where(
-                (row) =>
-                    row['id']?.toString() == landlordId,
+              final matchingLandlords = landlordRows.where(
+                (row) => row['id']?.toString() == landlordId,
               );
 
               for (final row in matchingLandlords) {
-                final propertyId =
-                    property['id']?.toString() ?? '';
+                final propertyId = property['id']?.toString() ?? '';
 
-                final propertyName =
-                    property['name']?.toString() ??
-                    'Property';
+                final propertyName = property['name']?.toString() ?? 'Property';
 
-                final landlordName =
-                    row['full_name']?.toString() ??
-                    'Landlord';
+                final landlordName = row['full_name']?.toString() ?? 'Landlord';
 
                 _contacts.add({
                   'id': landlordId,
                   'profile_id': landlordId,
                   'name': landlordName,
-                  'email':
-                      row['email']?.toString() ?? '',
-                  'phone':
-                      row['phone']?.toString() ?? '',
+                  'email': row['email']?.toString() ?? '',
+                  'phone': row['phone']?.toString() ?? '',
                   'type': 'landlord',
                   'unit_id': '',
                   'tenant_id': '',
@@ -17103,9 +18777,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
        * Keep the existing secure messaging directory.
        */
       if (_propertyId.isEmpty) {
-        debugPrint(
-          'MESSAGING: property ID is empty for non-owner user',
-        );
+        debugPrint('MESSAGING: property ID is empty for non-owner user');
 
         if (mounted) {
           setState(() => _loading = false);
@@ -17121,26 +18793,20 @@ class _ChatListScreenState extends State<ChatListScreen> {
         params: {'p_property_id': _propertyId},
       );
 
-      debugPrint(
-        'MESSAGING: secure contacts response = $response',
-      );
+      debugPrint('MESSAGING: secure contacts response = $response');
 
       for (final row in response) {
         final contact = Map<String, dynamic>.from(row);
 
-        final profileId =
-            contact['profile_id']?.toString() ?? '';
+        final profileId = contact['profile_id']?.toString() ?? '';
 
-        if (profileId.isEmpty ||
-            profileId == _currentUserId) {
+        if (profileId.isEmpty || profileId == _currentUserId) {
           continue;
         }
 
-        final contactRole =
-            contact['role']?.toString().toLowerCase() ?? '';
+        final contactRole = contact['role']?.toString().toLowerCase() ?? '';
 
-        final canChat =
-            contact['can_chat'] == true;
+        final canChat = contact['can_chat'] == true;
 
         _contacts.add({
           'id': profileId,
@@ -17150,8 +18816,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
               (contactRole == 'landlord'
                   ? 'Landlord'
                   : contactRole == 'owner'
-                      ? 'Owner'
-                      : 'Tenant'),
+                  ? 'Owner'
+                  : 'Tenant'),
           'email': '',
           'type': contactRole,
           'unit_id': '',
@@ -17181,13 +18847,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
       setState(() => _loading = false);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Could not load messages: $e',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not load messages: $e')));
     }
   }
 

@@ -17,6 +17,9 @@ class Apartment {
   bool isBoosted;
   DateTime? boostExpiresAt;
 
+  int likeCount;
+  bool isLiked;
+
   Apartment({
     this.id = '',
     required this.number,
@@ -32,6 +35,8 @@ class Apartment {
     this.videoPaths = const [],
     this.isBoosted = false,
     this.boostExpiresAt,
+    this.likeCount = 0,
+    this.isLiked = false,
   });
 
   bool get boostIsActive {
