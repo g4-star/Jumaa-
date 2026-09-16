@@ -31,12 +31,36 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
   @override
   void initState() {
     super.initState();
-    _checkPermissions();
+    _startPermissionSetup();
+  }
+
+  Future<void> _startPermissionSetup() async {
+    await _checkPermissions();
+
+    if (!mounted) return;
+
+    // Request location first because JUMAA uses it for apartment
+    // discovery, distance calculations and directions.
+    if (!_locationGranted) {
+      await _requestLocation();
+    }
+
+    if (!mounted) return;
+
+    // Request notifications after the location prompt has completed.
+    if (!_notificationGranted) {
+      await _requestNotifications();
+    }
+
+    if (!mounted) return;
+
+    // Refresh the final permission state after both requests.
+    await _checkPermissions();
   }
 
   Future<void> _checkPermissions() async {
-    final notificationSettings =
-        await FirebaseMessaging.instance.getNotificationSettings();
+    final notificationSettings = await FirebaseMessaging.instance
+        .getNotificationSettings();
 
     final locationReady = await _permissionService.canUseLocation();
 
@@ -162,11 +186,7 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
               color: iconColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: Icon(
-              icon,
-              color: iconColor,
-              size: 27,
-            ),
+            child: Icon(icon, color: iconColor, size: 27),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -198,10 +218,7 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
                   style: TextStyle(
                     fontSize: 13.5,
                     height: 1.45,
-                    color: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.color
+                    color: Theme.of(context).textTheme.bodyMedium?.color
                         ?.withValues(alpha: 0.72),
                   ),
                 ),
@@ -219,9 +236,7 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
                         ? const SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.2,
-                            ),
+                            child: CircularProgressIndicator(strokeWidth: 2.2),
                           )
                         : Text(granted ? 'Allowed' : 'Allow'),
                   ),
@@ -267,11 +282,7 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
                 child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.security_rounded,
-                      color: Colors.white,
-                      size: 42,
-                    ),
+                    Icon(Icons.security_rounded, color: Colors.white, size: 42),
                     SizedBox(height: 16),
                     Text(
                       'Make JUMAA work better for you',
@@ -299,10 +310,7 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
 
               const Text(
                 'Recommended permissions',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
               ),
 
               const SizedBox(height: 6),
@@ -310,10 +318,7 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
               Text(
                 'These permissions help JUMAA provide its main features.',
                 style: TextStyle(
-                  color: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.color
+                  color: Theme.of(context).textTheme.bodyMedium?.color
                       ?.withValues(alpha: 0.65),
                 ),
               ),
@@ -349,9 +354,7 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .surfaceContainerHighest
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest
                       .withValues(alpha: 0.45),
                   borderRadius: BorderRadius.circular(18),
                 ),
@@ -365,10 +368,7 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
                         'Camera access is requested only when you choose '
                         'to take a photo. JUMAA does not need camera access '
                         'just to browse apartments.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          height: 1.45,
-                        ),
+                        style: TextStyle(fontSize: 13, height: 1.45),
                       ),
                     ),
                   ],
@@ -397,9 +397,7 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
 
                       Navigator.pushReplacement(
                         context,
-                        MaterialPageRoute(
-                          builder: (_) => destination,
-                        ),
+                        MaterialPageRoute(builder: (_) => destination),
                       );
 
                       return;
@@ -414,10 +412,7 @@ class _JumaaPermissionsPageState extends State<JumaaPermissionsPage> {
                   ),
                   child: const Text(
                     'Continue to JUMAA',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
                 ),
               ),

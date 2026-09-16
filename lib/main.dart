@@ -10,7 +10,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+
 import 'data/kenya_locations.dart';
+
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
@@ -394,8 +396,7 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
 
   Future<void> _preparePermissionPage() async {
     final prefs = await SharedPreferences.getInstance();
-    final permissionsSeen =
-        prefs.getBool('jumaa_permissions_seen') ?? false;
+    final permissionsSeen = prefs.getBool('jumaa_permissions_seen') ?? false;
 
     if (!mounted) return;
 
@@ -407,7 +408,14 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
   Future<void> _checkLogin() async {
     try {
       // ----------------------------------------------------------
-      // CHECK THE REAL SUPABASE SESSION FIRST
+      // CHECK FIRST-LAUNCH PERMISSIONS BEFORE AUTHENTICATION
+      // ----------------------------------------------------------
+      await _preparePermissionPage();
+
+      if (!mounted) return;
+
+      // ----------------------------------------------------------
+      // CHECK THE REAL SUPABASE SESSION
       // ----------------------------------------------------------
       final session = OpenNestStore.supabase.auth.currentSession;
 
@@ -629,13 +637,14 @@ class _OpenNestAuthGateState extends State<OpenNestAuthGate> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    if (_loggedIn) {
-      if (_showPermissionPage) {
-        return JumaaPermissionsPage(
-          onFinished: _finishPermissionSetup,
-        );
-      }
+    // First-launch permissions are shown before authentication.
+    // This allows a brand-new user to grant or deny permissions
+    // before creating or signing into a JUMAA account.
+    if (_showPermissionPage) {
+      return JumaaPermissionsPage(onFinished: _finishPermissionSetup);
+    }
 
+    if (_loggedIn) {
       // Restore tenants directly to the tenant dashboard.
       // Supabase keeps the authentication session alive until
       // the user explicitly signs out.
@@ -2826,25 +2835,50 @@ class _OwnerApartmentManagementPageState
     return Card(
       elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: SizedBox(
-        height: 20,
+        height: 88,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 0),
+          padding: const EdgeInsets.all(14),
           child: Row(
             children: [
-              Icon(icon, size: 8),
-              const SizedBox(width: 2),
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0B3D2E).withValues(alpha: .08),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(icon, size: 27, color: const Color(0xFF0B3D2E)),
+              ),
+              const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  '$value $title',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 6,
-                    fontWeight: FontWeight.w600,
-                    height: 0.8,
-                  ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -4668,12 +4702,144 @@ class _PublicPropertyDetailsPageState extends State<PublicPropertyDetailsPage> {
     if (latitude == null || longitude == null) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This property does not have a GPS location yet.'),
-          behavior: SnackBarBehavior.floating,
-        ),
+      final areaParts = <String>[
+        property.location.trim(),
+        property.subcounty.trim(),
+        property.county.trim(),
+      ].where((part) => part.isNotEmpty).toList();
+
+      final areaLabel = areaParts.isEmpty
+          ? 'Location not specified'
+          : areaParts.join(', ');
+
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (sheetContext) {
+          return Container(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+            ),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary
+                              .withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.location_on_rounded,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Property Area',
+                          style: TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    property.name,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.place_rounded),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            areaLabel,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'This is the general area provided for this property. '
+                    'An exact GPS location has not been provided by the property owner.',
+                    style: TextStyle(color: Colors.black54, fontSize: 13),
+                  ),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        final mapsUrl = Uri.parse(
+                          'https://www.google.com/maps/search/?api=1'
+                          '&query=${Uri.encodeComponent(areaLabel)}',
+                        );
+
+                        final launched = await launchUrl(
+                          mapsUrl,
+                          mode: LaunchMode.externalApplication,
+                        );
+
+                        if (!launched && sheetContext.mounted) {
+                          ScaffoldMessenger.of(sheetContext).showSnackBar(
+                            const SnackBar(
+                              content: Text('Could not open Google Maps.'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.map_rounded),
+                      label: const Text(
+                        'OPEN AREA IN MAPS',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       );
+
       return;
     }
 
@@ -15290,15 +15456,11 @@ class _PropertyImageCarouselState extends State<_PropertyImageCarousel> {
   }
 }
 
-
 class _PublicPropertyListing {
   final Property property;
   final List<Apartment> vacantUnits;
 
-  _PublicPropertyListing({
-    required this.property,
-    required this.vacantUnits,
-  });
+  _PublicPropertyListing({required this.property, required this.vacantUnits});
 
   int get vacantCount => vacantUnits.length;
 
@@ -15307,10 +15469,7 @@ class _PublicPropertyListing {
 
     return vacantUnits
         .map((unit) => unit.likeCount)
-        .fold<int>(
-          0,
-          (highest, value) => value > highest ? value : highest,
-        );
+        .fold<int>(0, (highest, value) => value > highest ? value : highest);
   }
 
   bool get isLiked {
@@ -15389,22 +15548,17 @@ class PublicUserPage extends StatefulWidget {
   State<PublicUserPage> createState() => _PublicUserPageState();
 }
 
-
 class PublicPropertyRoutePage extends StatefulWidget {
   final Property property;
 
-  const PublicPropertyRoutePage({
-    super.key,
-    required this.property,
-  });
+  const PublicPropertyRoutePage({super.key, required this.property});
 
   @override
   State<PublicPropertyRoutePage> createState() =>
       _PublicPropertyRoutePageState();
 }
 
-class _PublicPropertyRoutePageState
-    extends State<PublicPropertyRoutePage> {
+class _PublicPropertyRoutePageState extends State<PublicPropertyRoutePage> {
   Position? _currentPosition;
   double? _distanceMeters;
   bool _loading = true;
@@ -15421,18 +15575,10 @@ class _PublicPropertyRoutePageState
     final latitude = property.latitude;
     final longitude = property.longitude;
 
-    if (latitude == null || longitude == null) {
-      if (!mounted) return;
-
-      setState(() {
-        _loading = false;
-        _error = 'This property does not have a GPS location yet.';
-      });
-
-      return;
-    }
-
     try {
+      // Always obtain the user's location first.
+      // This is needed even when the property only has an area/address
+      // and does not have exact GPS coordinates.
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
       if (!serviceEnabled) {
@@ -15447,8 +15593,7 @@ class _PublicPropertyRoutePageState
         return;
       }
 
-      LocationPermission permission =
-          await Geolocator.checkPermission();
+      LocationPermission permission = await Geolocator.checkPermission();
 
       if (permission == LocationPermission.denied) {
         permission = await JumaaPermissionService.instance.requestLocation();
@@ -15470,19 +15615,38 @@ class _PublicPropertyRoutePageState
 
         setState(() {
           _loading = false;
-          _error =
-              'Location permission is permanently denied. Enable it in app settings.';
+          _error = 'Location permission is permanently denied. Enable it in app settings.';
         });
 
         return;
       }
 
+      // Get the user's current GPS position regardless of whether the
+      // property has exact GPS coordinates.
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
         ),
       );
 
+      if (!mounted) return;
+
+      _currentPosition = position;
+
+      // The property has no exact GPS coordinates.
+      // Keep the user's location so the area fallback can navigate from
+      // the user's current position to the property's general area.
+      if (latitude == null || longitude == null) {
+        setState(() {
+          _distanceMeters = null;
+          _loading = false;
+          _error = null;
+        });
+
+        return;
+      }
+
+      // Exact property GPS is available, so calculate the real distance.
       final distance = Geolocator.distanceBetween(
         position.latitude,
         position.longitude,
@@ -15490,12 +15654,10 @@ class _PublicPropertyRoutePageState
         longitude,
       );
 
-      if (!mounted) return;
-
       setState(() {
-        _currentPosition = position;
         _distanceMeters = distance;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -15523,20 +15685,65 @@ class _PublicPropertyRoutePageState
     return '${distance.round()} m';
   }
 
-  Future<void> _openGoogleMaps() async {
+  Future<void> _openPropertyAreaInMaps() async {
+    final property = widget.property;
     final position = _currentPosition;
-    final latitude = widget.property.latitude;
-    final longitude = widget.property.longitude;
 
-    if (position == null || latitude == null || longitude == null) {
+    final parts = [
+      property.address,
+      property.location,
+      property.subcounty,
+      property.county,
+    ].where((value) => value.trim().isNotEmpty).toList();
+
+    if (parts.isEmpty) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No property area information is available.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
       return;
     }
 
+    final destination = Uri.encodeComponent(parts.join(', '));
+
+    // When JUMAA has the user's GPS, open Google Maps directions
+    // from the user's current position to the property's general area.
+    if (position != null) {
+      final origin = '${position.latitude},${position.longitude}';
+
+      final mapsUrl = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1'
+        '&origin=$origin'
+        '&destination=$destination'
+        '&travelmode=driving',
+      );
+
+      final launched = await launchUrl(
+        mapsUrl,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open Google Maps.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+
+      return;
+    }
+
+    // If the user has not granted location access, fall back to
+    // searching for the property's general area.
     final mapsUrl = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1'
-      '&origin=${position.latitude},${position.longitude}'
-      '&destination=$latitude,$longitude'
-      '&travelmode=driving',
+      'https://www.google.com/maps/search/?api=1&query=$destination',
     );
 
     final launched = await launchUrl(
@@ -15545,6 +15752,127 @@ class _PublicPropertyRoutePageState
     );
 
     if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open Google Maps.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openGoogleMaps() async {
+    final property = widget.property;
+    final position = _currentPosition;
+    final latitude = property.latitude;
+    final longitude = property.longitude;
+
+    // ----------------------------------------------------------
+    // EXACT PROPERTY GPS AVAILABLE
+    // ----------------------------------------------------------
+    if (position != null && latitude != null && longitude != null) {
+      final mapsUrl = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1'
+        '&origin=${position.latitude},${position.longitude}'
+        '&destination=$latitude,$longitude'
+        '&travelmode=driving',
+      );
+
+      try {
+        final launched = await launchUrl(
+          mapsUrl,
+          mode: LaunchMode.externalApplication,
+        );
+
+        if (!launched && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not open Google Maps.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('JUMAA GOOGLE MAPS ERROR: $e');
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open Google Maps.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // NO EXACT GPS — USE PROPERTY AREA / ADDRESS
+    // ----------------------------------------------------------
+    final parts = [
+      property.address,
+      property.location,
+      property.subcounty,
+      property.county,
+    ].where((value) => value.trim().isNotEmpty).toList();
+
+    if (parts.isEmpty) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This property does not have enough location information for directions.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      return;
+    }
+
+    final destination = Uri.encodeComponent(parts.join(', '));
+
+    Uri mapsUrl;
+
+    if (position != null) {
+      // User location is available, so route from the user
+      // to the property's general area.
+      mapsUrl = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1'
+        '&origin=${position.latitude},${position.longitude}'
+        '&destination=$destination'
+        '&travelmode=driving',
+      );
+    } else {
+      // No user GPS available — search for the property area.
+      mapsUrl = Uri.parse(
+        'https://www.google.com/maps/search/?api=1'
+        '&query=$destination',
+      );
+    }
+
+    try {
+      final launched = await launchUrl(
+        mapsUrl,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open Google Maps.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('JUMAA AREA MAPS ERROR: $e');
+
+      if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Could not open Google Maps.'),
@@ -15567,9 +15895,7 @@ class _PublicPropertyRoutePageState
         centerTitle: true,
       ),
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(),
-            )
+          ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _loadRoute,
               child: ListView(
@@ -15581,13 +15907,9 @@ class _PublicPropertyRoutePageState
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
-                          Theme.of(context)
-                              .colorScheme
-                              .primary
+                          Theme.of(context).colorScheme.primary
                               .withValues(alpha: 0.95),
-                          Theme.of(context)
-                              .colorScheme
-                              .secondary
+                          Theme.of(context).colorScheme.secondary
                               .withValues(alpha: 0.85),
                         ],
                         begin: Alignment.topLeft,
@@ -15657,12 +15979,12 @@ class _PublicPropertyRoutePageState
                           const SizedBox(height: 6),
                           Text(
                             [
-                              property.location,
-                              property.subcounty,
-                              property.county,
-                            ].where((value) => value.trim().isNotEmpty).join(
-                                  ', ',
-                                ),
+                                  property.location,
+                                  property.subcounty,
+                                  property.county,
+                                ]
+                                .where((value) => value.trim().isNotEmpty)
+                                .join(', '),
                             style: const TextStyle(
                               color: Colors.black54,
                               height: 1.4,
@@ -15672,9 +15994,7 @@ class _PublicPropertyRoutePageState
                             const SizedBox(height: 4),
                             Text(
                               property.address,
-                              style: const TextStyle(
-                                color: Colors.black54,
-                              ),
+                              style: const TextStyle(color: Colors.black54),
                             ),
                           ],
                         ],
@@ -15683,35 +16003,116 @@ class _PublicPropertyRoutePageState
                   ),
 
                   const SizedBox(height: 14),
-
                   if (_error != null)
                     Card(
-                      color: Colors.orange.shade50,
+                      color: Theme.of(context).colorScheme.surface,
+                      elevation: 2,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(20),
+                        side: BorderSide(
+                          color: Theme.of(context).colorScheme.outline
+                              .withValues(alpha: 0.15),
+                        ),
                       ),
                       child: Padding(
-                        padding: const EdgeInsets.all(18),
+                        padding: const EdgeInsets.all(20),
                         child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(
-                              Icons.location_off_rounded,
-                              color: Colors.orange.shade800,
-                              size: 38,
+                            Row(
+                              children: [
+                                Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primary
+                                        .withValues(alpha: 0.10),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.location_on_rounded,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                const Expanded(
+                                  child: Text(
+                                    'Property Area',
+                                    style: TextStyle(
+                                      fontSize: 19,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 10),
+
+                            const SizedBox(height: 18),
+
                             Text(
-                              _error!,
-                              textAlign: TextAlign.center,
+                              [
+                                    property.location,
+                                    property.subcounty,
+                                    property.county,
+                                  ]
+                                  .where((value) => value.trim().isNotEmpty)
+                                  .join(', '),
                               style: const TextStyle(
-                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                height: 1.4,
                               ),
                             ),
-                            const SizedBox(height: 12),
-                            OutlinedButton.icon(
-                              onPressed: _loadRoute,
-                              icon: const Icon(Icons.refresh_rounded),
-                              label: const Text('TRY AGAIN'),
+
+                            if (property.address.trim().isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                property.address,
+                                style: const TextStyle(
+                                  color: Colors.black54,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+
+                            const SizedBox(height: 16),
+
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: const Text(
+                                'This is the general area provided for this property. '
+                                'An exact GPS location has not been provided by the property owner.',
+                                style: TextStyle(fontSize: 14, height: 1.5),
+                              ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: _openPropertyAreaInMaps,
+                                icon: const Icon(Icons.map_rounded),
+                                label: const Text('OPEN AREA IN MAPS'),
+                              ),
+                            ),
+
+                            const SizedBox(height: 8),
+
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: _loadRoute,
+                                icon: const Icon(Icons.refresh_rounded),
+                                label: const Text('TRY AGAIN'),
+                              ),
                             ),
                           ],
                         ),
@@ -15733,9 +16134,7 @@ class _PublicPropertyRoutePageState
                                   width: 48,
                                   height: 48,
                                   decoration: BoxDecoration(
-                                    color: Colors.blue.withValues(
-                                      alpha: 0.10,
-                                    ),
+                                    color: Colors.blue.withValues(alpha: 0.10),
                                     shape: BoxShape.circle,
                                   ),
                                   child: const Icon(
@@ -15770,9 +16169,7 @@ class _PublicPropertyRoutePageState
                                   width: 48,
                                   height: 48,
                                   decoration: BoxDecoration(
-                                    color: Colors.red.withValues(
-                                      alpha: 0.10,
-                                    ),
+                                    color: Colors.red.withValues(alpha: 0.10),
                                     shape: BoxShape.circle,
                                   ),
                                   child: const Icon(
@@ -15809,9 +16206,7 @@ class _PublicPropertyRoutePageState
                                   const Expanded(
                                     child: Text(
                                       'Approx. distance',
-                                      style: TextStyle(
-                                        color: Colors.black54,
-                                      ),
+                                      style: TextStyle(color: Colors.black54),
                                     ),
                                   ),
                                   Text(
@@ -15840,10 +16235,7 @@ class _PublicPropertyRoutePageState
                       child: const Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            Icons.info_outline_rounded,
-                            color: Colors.blue,
-                          ),
+                          Icon(Icons.info_outline_rounded, color: Colors.blue),
                           SizedBox(width: 12),
                           Expanded(
                             child: Text(
@@ -15867,19 +16259,13 @@ class _PublicPropertyRoutePageState
                       width: double.infinity,
                       child: FilledButton.icon(
                         onPressed: _openGoogleMaps,
-                        icon: const Icon(
-                          Icons.directions_rounded,
-                        ),
+                        icon: const Icon(Icons.directions_rounded),
                         label: const Text(
                           'SHOW ROUTE TO APARTMENT',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                          ),
+                          style: TextStyle(fontWeight: FontWeight.w800),
                         ),
                         style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 17,
-                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 17),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(15),
                           ),
@@ -15896,9 +16282,7 @@ class _PublicPropertyRoutePageState
                         icon: const Icon(Icons.refresh_rounded),
                         label: const Text('REFRESH MY LOCATION'),
                         style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 15,
-                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 15),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(15),
                           ),
@@ -16037,13 +16421,14 @@ class _PublicUserPageState extends State<PublicUserPage> {
 
     final counties = kenyaCountiesAndSubcounties.keys.toList()..sort();
 
-    final houseTypes = OpenNestStore.apartments
-        .where((a) => a.status.toLowerCase() == 'vacant')
-        .map((a) => a.type.trim())
-        .where((v) => v.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
+    final houseTypes =
+        OpenNestStore.apartments
+            .where((a) => a.status.toLowerCase() == 'vacant')
+            .map((a) => a.type.trim())
+            .where((v) => v.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
 
     await showModalBottomSheet(
       context: context,
@@ -16052,20 +16437,18 @@ class _PublicUserPageState extends State<PublicUserPage> {
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            final filteredSubcounties = county == null
-                ? <String>[]
-                : (kenyaCountiesAndSubcounties[county] ??
-                        <String>[])
-                    .toList()
+            final filteredSubcounties =
+                county == null
+                      ? <String>[]
+                      : (kenyaCountiesAndSubcounties[county] ?? <String>[])
+                            .toList()
                   ..sort();
 
             return Container(
               height: MediaQuery.of(context).size.height * 0.82,
               decoration: const BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.vertical(
-                  top: Radius.circular(28),
-                ),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
               ),
               child: SafeArea(
                 child: Column(
@@ -16127,8 +16510,9 @@ class _PublicUserPageState extends State<PublicUserPage> {
                             initialValue: county,
                             decoration: InputDecoration(
                               labelText: 'County',
-                              prefixIcon:
-                                  const Icon(Icons.location_city_rounded),
+                              prefixIcon: const Icon(
+                                Icons.location_city_rounded,
+                              ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
                               ),
@@ -16159,8 +16543,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                             initialValue: subcounty,
                             decoration: InputDecoration(
                               labelText: 'Subcounty',
-                              prefixIcon:
-                                  const Icon(Icons.map_rounded),
+                              prefixIcon: const Icon(Icons.map_rounded),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
                               ),
@@ -16202,8 +16585,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                             initialValue: houseType,
                             decoration: InputDecoration(
                               labelText: 'House type',
-                              prefixIcon:
-                                  const Icon(Icons.home_work_rounded),
+                              prefixIcon: const Icon(Icons.home_work_rounded),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
                               ),
@@ -16239,8 +16621,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                                     labelText: 'Min rent',
                                     prefixText: 'KSh ',
                                     border: OutlineInputBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(14),
+                                      borderRadius: BorderRadius.circular(14),
                                     ),
                                   ),
                                 ),
@@ -16254,8 +16635,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                                     labelText: 'Max rent',
                                     prefixText: 'KSh ',
                                     border: OutlineInputBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(14),
+                                      borderRadius: BorderRadius.circular(14),
                                     ),
                                   ),
                                 ),
@@ -16279,9 +16659,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                             contentPadding: EdgeInsets.zero,
                             title: const Text(
                               'Boosted apartments only',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: TextStyle(fontWeight: FontWeight.w600),
                             ),
                             subtitle: const Text(
                               'Show currently promoted properties',
@@ -16302,9 +16680,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                             contentPadding: EdgeInsets.zero,
                             title: const Text(
                               'Most liked first',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: TextStyle(fontWeight: FontWeight.w600),
                             ),
                             secondary: const Icon(
                               Icons.favorite_rounded,
@@ -16325,9 +16701,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                             contentPadding: EdgeInsets.zero,
                             title: const Text(
                               'Lowest rent first',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: TextStyle(fontWeight: FontWeight.w600),
                             ),
                             secondary: const Icon(
                               Icons.payments_rounded,
@@ -16366,8 +16740,9 @@ class _PublicUserPageState extends State<PublicUserPage> {
                                 setSheetState(() {});
                               },
                               style: OutlinedButton.styleFrom(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
@@ -16380,15 +16755,13 @@ class _PublicUserPageState extends State<PublicUserPage> {
                             flex: 2,
                             child: FilledButton(
                               onPressed: () {
-                                final min =
-                                    double.tryParse(
-                                      minRentController.text.trim(),
-                                    );
+                                final min = double.tryParse(
+                                  minRentController.text.trim(),
+                                );
 
-                                final max =
-                                    double.tryParse(
-                                      maxRentController.text.trim(),
-                                    );
+                                final max = double.tryParse(
+                                  maxRentController.text.trim(),
+                                );
 
                                 Navigator.pop(sheetContext);
 
@@ -16406,20 +16779,18 @@ class _PublicUserPageState extends State<PublicUserPage> {
                                 });
                               },
                               style: FilledButton.styleFrom(
-                                backgroundColor:
-                                    const Color(0xFF0B3D2E),
+                                backgroundColor: const Color(0xFF0B3D2E),
                                 foregroundColor: Colors.white,
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                               ),
                               child: const Text(
                                 'APPLY FILTERS',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                ),
+                                style: TextStyle(fontWeight: FontWeight.w800),
                               ),
                             ),
                           ),
@@ -16465,14 +16836,12 @@ class _PublicUserPageState extends State<PublicUserPage> {
 
         final propertyMatches =
             property != null &&
-            (
-              property.name.toLowerCase().contains(_search) ||
-              property.county.toLowerCase().contains(_search) ||
-              property.subcounty.toLowerCase().contains(_search) ||
-              property.location.toLowerCase().contains(_search) ||
-              property.address.toLowerCase().contains(_search) ||
-              property.description.toLowerCase().contains(_search)
-            );
+            (property.name.toLowerCase().contains(_search) ||
+                property.county.toLowerCase().contains(_search) ||
+                property.subcounty.toLowerCase().contains(_search) ||
+                property.location.toLowerCase().contains(_search) ||
+                property.address.toLowerCase().contains(_search) ||
+                property.description.toLowerCase().contains(_search));
 
         final unitMatches =
             apartment.number.toLowerCase().contains(_search) ||
@@ -16498,8 +16867,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
         continue;
       }
 
-      if (_selectedCounty != null &&
-          filterProperty.county != _selectedCounty) {
+      if (_selectedCounty != null && filterProperty.county != _selectedCounty) {
         continue;
       }
 
@@ -16509,10 +16877,9 @@ class _PublicUserPageState extends State<PublicUserPage> {
       }
 
       if (_selectedHouseType != null &&
-          !apartment.type
-              .trim()
-              .toLowerCase()
-              .contains(_selectedHouseType!.toLowerCase())) {
+          !apartment.type.trim().toLowerCase().contains(
+            _selectedHouseType!.toLowerCase(),
+          )) {
         continue;
       }
 
@@ -16530,9 +16897,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
         continue;
       }
 
-      grouped
-          .putIfAbsent(propertyId, () => <Apartment>[])
-          .add(apartment);
+      grouped.putIfAbsent(propertyId, () => <Apartment>[]).add(apartment);
     }
 
     final listings = <_PublicPropertyListing>[];
@@ -16552,10 +16917,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
       }
 
       listings.add(
-        _PublicPropertyListing(
-          property: property,
-          vacantUnits: entry.value,
-        ),
+        _PublicPropertyListing(property: property, vacantUnits: entry.value),
       );
     }
 
@@ -16596,8 +16958,8 @@ class _PublicUserPageState extends State<PublicUserPage> {
       }
 
       return a.property.name.toLowerCase().compareTo(
-            b.property.name.toLowerCase(),
-          );
+        b.property.name.toLowerCase(),
+      );
     });
 
     return listings;
@@ -16719,10 +17081,9 @@ class _PublicUserPageState extends State<PublicUserPage> {
                                 height: 42,
                                 decoration: BoxDecoration(
                                   color: _hasMarketplaceFilters
-                                      ? Colors.white
-                                          .withValues(alpha: 0.16)
+                                      ? Colors.white.withValues(alpha: 0.16)
                                       : const Color(0xFF0B3D2E)
-                                          .withValues(alpha: 0.09),
+                                            .withValues(alpha: 0.09),
                                   borderRadius: BorderRadius.circular(13),
                                 ),
                                 child: Icon(
@@ -16734,8 +17095,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       _hasMarketplaceFilters
@@ -16757,8 +17117,9 @@ class _PublicUserPageState extends State<PublicUserPage> {
                                         fontSize: 11.5,
                                         fontWeight: FontWeight.w500,
                                         color: _hasMarketplaceFilters
-                                            ? Colors.white
-                                                .withValues(alpha: 0.82)
+                                            ? Colors.white.withValues(
+                                                alpha: 0.82,
+                                              )
                                             : Colors.black54,
                                       ),
                                     ),
@@ -16769,10 +17130,9 @@ class _PublicUserPageState extends State<PublicUserPage> {
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
                                   color: _hasMarketplaceFilters
-                                      ? Colors.white
-                                          .withValues(alpha: 0.14)
+                                      ? Colors.white.withValues(alpha: 0.14)
                                       : const Color(0xFF0B3D2E)
-                                          .withValues(alpha: 0.07),
+                                            .withValues(alpha: 0.07),
                                   shape: BoxShape.circle,
                                 ),
                                 child: Icon(
@@ -16924,8 +17284,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
     }
 
     final now = DateTime.now().microsecondsSinceEpoch;
-    final randomPart =
-        DateTime.now().millisecondsSinceEpoch.remainder(1000000);
+    final randomPart = DateTime.now().millisecondsSinceEpoch.remainder(1000000);
 
     final anonymousId = 'visitor_${now}_$randomPart';
 
@@ -16943,17 +17302,14 @@ class _PublicUserPageState extends State<PublicUserPage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'This property is missing its property information.',
-          ),
+          content: Text('This property is missing its property information.'),
         ),
       );
 
       return;
     }
 
-    final anonymousId =
-        userId == null ? await _getAnonymousVisitorId() : null;
+    final anonymousId = userId == null ? await _getAnonymousVisitorId() : null;
 
     final propertyApartments = OpenNestStore.apartments
         .where((unit) => unit.propertyId == propertyId)
@@ -16986,9 +17342,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
           await query.eq('anonymous_id', anonymousId!);
         }
       } else {
-        final payload = <String, dynamic>{
-          'property_id': propertyId,
-        };
+        final payload = <String, dynamic>{'property_id': propertyId};
 
         if (userId != null) {
           payload['user_id'] = userId;
@@ -16996,9 +17350,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
           payload['anonymous_id'] = anonymousId;
         }
 
-        await OpenNestStore.supabase
-            .from('property_likes')
-            .insert(payload);
+        await OpenNestStore.supabase.from('property_likes').insert(payload);
       }
 
       debugPrint(
@@ -17023,9 +17375,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Could not update your like. Please try again.',
-            ),
+            content: Text('Could not update your like. Please try again.'),
           ),
         );
       }
@@ -17044,9 +17394,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
       clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -17142,11 +17490,9 @@ class _PublicUserPageState extends State<PublicUserPage> {
                         property.location.isNotEmpty
                             ? property.location
                             : property.address.isNotEmpty
-                                ? property.address
-                                : 'Location not provided',
-                        style: const TextStyle(
-                          color: Colors.black54,
-                        ),
+                            ? property.address
+                            : 'Location not provided',
+                        style: const TextStyle(color: Colors.black54),
                       ),
                     ),
                   ],
@@ -17174,10 +17520,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                   const SizedBox(height: 10),
                   Text(
                     listing.unitTypes.join(' • '),
-                    style: const TextStyle(
-                      color: Colors.black54,
-                      fontSize: 13,
-                    ),
+                    style: const TextStyle(color: Colors.black54, fontSize: 13),
                   ),
                 ],
 
@@ -17187,10 +17530,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
                     property.description,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.black54,
-                      height: 1.35,
-                    ),
+                    style: const TextStyle(color: Colors.black54, height: 1.35),
                   ),
                 ],
 
@@ -17201,9 +17541,8 @@ class _PublicUserPageState extends State<PublicUserPage> {
                     InkWell(
                       onTap: listing.vacantUnits.isEmpty
                           ? null
-                          : () => _togglePropertyLike(
-                                listing.vacantUnits.first,
-                              ),
+                          : () =>
+                                _togglePropertyLike(listing.vacantUnits.first),
                       borderRadius: BorderRadius.circular(22),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -17254,9 +17593,8 @@ class _PublicUserPageState extends State<PublicUserPage> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => PublicPropertyRoutePage(
-                              property: property,
-                            ),
+                            builder: (_) =>
+                                PublicPropertyRoutePage(property: property),
                           ),
                         );
                       },
@@ -17275,9 +17613,8 @@ class _PublicUserPageState extends State<PublicUserPage> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => PublicPropertyDetailsPage(
-                            property: property,
-                          ),
+                          builder: (_) =>
+                              PublicPropertyDetailsPage(property: property),
                         ),
                       );
                     },
@@ -17303,10 +17640,7 @@ class _PublicUserPageState extends State<PublicUserPage> {
 
   Widget _propertyInfoChip(IconData icon, String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 7,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: const Color(0xFFF2F7F4),
         borderRadius: BorderRadius.circular(10),
@@ -17314,18 +17648,11 @@ class _PublicUserPageState extends State<PublicUserPage> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 16,
-            color: const Color(0xFF0B3D2E),
-          ),
+          Icon(icon, size: 16, color: const Color(0xFF0B3D2E)),
           const SizedBox(width: 5),
           Text(
             text,
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
           ),
         ],
       ),
@@ -17367,8 +17694,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
 
   Future<void> _navigateAfterLogin(Widget destination) async {
     final prefs = await SharedPreferences.getInstance();
-    final permissionsSeen =
-        prefs.getBool('jumaa_permissions_seen') ?? false;
+    final permissionsSeen = prefs.getBool('jumaa_permissions_seen') ?? false;
 
     if (!mounted) return;
 
@@ -17376,9 +17702,8 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => JumaaPermissionsPage(
-            destinationBuilder: (_) => destination,
-          ),
+          builder: (_) =>
+              JumaaPermissionsPage(destinationBuilder: (_) => destination),
         ),
       );
       return;
@@ -17386,9 +17711,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(
-        builder: (_) => destination,
-      ),
+      MaterialPageRoute(builder: (_) => destination),
     );
   }
 
@@ -17578,8 +17901,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
           landlord: landlord,
           isDarkMode: Theme.of(context).brightness == Brightness.dark,
           onDarkModeChanged: (enabled) {
-            final state = context
-                .findAncestorStateOfType<_ApartmentAppState>();
+            final state = context.findAncestorStateOfType<_ApartmentAppState>();
 
             state?._setDarkMode(enabled);
           },
@@ -17633,8 +17955,9 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
           _isLoggingIn = false;
         });
 
-        final tenantDashboard =
-            TenantDashboardPage(tenantProfile: tenantProfile);
+        final tenantDashboard = TenantDashboardPage(
+          tenantProfile: tenantProfile,
+        );
 
         await _navigateAfterLogin(tenantDashboard);
 
@@ -17688,8 +18011,7 @@ class _JUMAALoginPageState extends State<JUMAALoginPage> {
         final ownerDashboard = DashboardPage(
           isDarkMode: Theme.of(context).brightness == Brightness.dark,
           onDarkModeChanged: (enabled) {
-            final state = context
-                .findAncestorStateOfType<_ApartmentAppState>();
+            final state = context.findAncestorStateOfType<_ApartmentAppState>();
 
             state?._setDarkMode(enabled);
           },
