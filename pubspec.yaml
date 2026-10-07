@@ -45,6 +45,7 @@ dependencies:
   flutter_local_notifications: ^22.3.0
   qr_flutter: ^4.1.0
   flutter_svg: ^2.3.0
+  connectivity_plus: ^7.3.1
 
 dev_dependencies:
   flutter_test:
@@ -68,3 +69,4 @@ flutter:
   assets:
     - assets/houses/
     - assets/jumaa_house_icon.png
+    - assets/images/jumaa-logo.jpeg

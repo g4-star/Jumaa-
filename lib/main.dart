@@ -11,6 +11,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'services/jumaa_connectivity_service.dart';
+
 import 'data/kenya_locations.dart';
 
 import 'package:http/http.dart' as http;
@@ -195,6 +197,8 @@ Future<void> main() async {
     publishableKey: 'sb_publishable_wFuJsdho3es8WrD4vkqC_A_8MLx_0ft',
   );
 
+  await JumaaConnectivityService.instance.initialize();
+
   await _initializeFirebaseMessaging();
 
   // Marketplace data is loaded by PublicUserPage when the
@@ -364,6 +368,60 @@ class _ApartmentAppState extends State<ApartmentApp> {
         ),
       ),
       home: const OpenNestAuthGate(),
+      builder: (context, child) {
+        return StreamBuilder<bool>(
+          stream: JumaaConnectivityService.instance.statusStream,
+          initialData: JumaaConnectivityService.instance.isOnline,
+          builder: (context, snapshot) {
+            final isOnline = snapshot.data ?? true;
+
+            return Stack(
+              children: [
+                child ?? const SizedBox.shrink(),
+
+                if (!isOnline)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: SafeArea(
+                      bottom: false,
+                      child: Material(
+                        color: const Color(0xFFB91C1C),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 9,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.wifi_off_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'You’re offline • Showing saved information',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -792,8 +850,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
   List<Widget> get pages => [
     AdminDashboardPage(
-      apartments: OpenNestStore.apartments,
-      properties: OpenNestStore.properties,
+      apartments: OpenNestStore.ownerApartments,
+      properties: OpenNestStore.ownerProperties,
       landlords: OpenNestStore.landlords,
       onOpenApartments: () => _selectPage(1),
       onOpenLandlords: () => _selectPage(2),
@@ -967,7 +1025,7 @@ class _SubscriptionsPlaceholderPageState
 
       Property? property;
 
-      for (final candidate in OpenNestStore.properties) {
+      for (final candidate in OpenNestStore.ownerProperties) {
         if (candidate.ownerId == user.id) {
           property = candidate;
           break;
@@ -977,7 +1035,7 @@ class _SubscriptionsPlaceholderPageState
       if (property == null) {
         await OpenNestStore.loadOwnerPropertiesFromSupabase();
 
-        for (final candidate in OpenNestStore.properties) {
+        for (final candidate in OpenNestStore.ownerProperties) {
           if (candidate.ownerId == user.id) {
             property = candidate;
             break;
@@ -2431,11 +2489,11 @@ class _OwnerApartmentManagementPageState
 
       debugPrint(
         'OWNER APARTMENT PAGE: Properties='
-        '${OpenNestStore.properties.length}, '
-        'apartments=${OpenNestStore.apartments.length}',
+        '${OpenNestStore.ownerProperties.length}, '
+        'apartments=${OpenNestStore.ownerApartments.length}',
       );
 
-      for (final property in OpenNestStore.properties) {
+      for (final property in OpenNestStore.ownerProperties) {
         debugPrint(
           'OWNER APARTMENT PAGE PROPERTY: '
           '${property.name} (${property.id}) '
@@ -2470,7 +2528,7 @@ class _OwnerApartmentManagementPageState
       return null;
     }
 
-    final ownedProperties = OpenNestStore.properties
+    final ownedProperties = OpenNestStore.ownerProperties
         .where((property) => property.ownerId == user.id)
         .toList();
 
@@ -2488,7 +2546,7 @@ class _OwnerApartmentManagementPageState
       return [];
     }
 
-    return OpenNestStore.apartments
+    return OpenNestStore.ownerApartments
         .where((unit) => unit.propertyId == currentProperty.id)
         .toList();
   }
@@ -3020,7 +3078,7 @@ class _OwnerEditPropertyPageState extends State<OwnerEditPropertyPage> {
       widget.property.description = descriptionController.text.trim();
 
       // Keep existing units synchronized with the property.
-      for (final unit in OpenNestStore.apartments) {
+      for (final unit in OpenNestStore.ownerApartments) {
         if (unit.propertyId == widget.property.id) {
           unit.propertyName = widget.property.name;
           unit.location = widget.property.location;
@@ -3553,7 +3611,7 @@ class OwnerUnitsManagementPage extends StatefulWidget {
 
 class _OwnerUnitsManagementPageState extends State<OwnerUnitsManagementPage> {
   List<Apartment> get units {
-    return OpenNestStore.apartments
+    return OpenNestStore.ownerApartments
         .where((unit) => unit.propertyId == widget.property.id)
         .toList();
   }
@@ -5366,10 +5424,10 @@ class ManageApartmentsPage extends StatefulWidget {
 class _ManageApartmentsPageState extends State<ManageApartmentsPage> {
   String _searchQuery = '';
 
-  List<Property> get _properties => OpenNestStore.properties;
+  List<Property> get _properties => OpenNestStore.ownerProperties;
 
   List<Apartment> _unitsForProperty(String propertyId) {
-    return OpenNestStore.apartments
+    return OpenNestStore.ownerApartments
         .where((unit) => unit.propertyId == propertyId)
         .toList();
   }
@@ -5399,11 +5457,11 @@ class _ManageApartmentsPageState extends State<ManageApartmentsPage> {
           property.address.toLowerCase().contains(query);
     }).toList();
 
-    final totalUnits = OpenNestStore.apartments.length;
-    final vacantUnits = OpenNestStore.apartments
+    final totalUnits = OpenNestStore.ownerApartments.length;
+    final vacantUnits = OpenNestStore.ownerApartments
         .where((unit) => unit.status == 'Vacant')
         .length;
-    final occupiedUnits = OpenNestStore.apartments
+    final occupiedUnits = OpenNestStore.ownerApartments
         .where((unit) => unit.status == 'Occupied')
         .length;
 
@@ -5694,7 +5752,7 @@ class ManagePropertyPage extends StatefulWidget {
 }
 
 class _ManagePropertyPageState extends State<ManagePropertyPage> {
-  List<Apartment> get _units => OpenNestStore.apartments
+  List<Apartment> get _units => OpenNestStore.ownerApartments
       .where((unit) => unit.propertyId == widget.property.id)
       .toList();
 
@@ -7923,8 +7981,8 @@ class OpenNestStore {
 
     if (user == null) {
       debugPrint('OWNER PROPERTIES: No authenticated user.');
-      properties.clear();
-      apartments.clear();
+      ownerProperties.clear();
+      ownerApartments.clear();
       return;
     }
 
@@ -7976,10 +8034,10 @@ class OpenNestStore {
 
     final rows = List<Map<String, dynamic>>.from(propertyResponse);
 
-    final ownerProperties = <Property>[];
+    final loadedOwnerProperties = <Property>[];
 
     for (final row in rows) {
-      ownerProperties.add(
+      loadedOwnerProperties.add(
         Property(
           id: row['id']?.toString() ?? '',
           ownerId: row['owner_id']?.toString() ?? user.id,
@@ -8009,7 +8067,9 @@ class OpenNestStore {
       );
     }
 
-    final propertyIds = ownerProperties.map((property) => property.id).toSet();
+    final propertyIds = loadedOwnerProperties
+        .map((property) => property.id)
+        .toSet();
 
     final ownerUnits = <Apartment>[];
 
@@ -8034,7 +8094,7 @@ class OpenNestStore {
           continue;
         }
 
-        final property = ownerProperties.firstWhere(
+        final property = loadedOwnerProperties.firstWhere(
           (item) => item.id == propertyId,
         );
 
@@ -8055,21 +8115,21 @@ class OpenNestStore {
       }
     }
 
-    properties
+    ownerProperties
       ..clear()
-      ..addAll(ownerProperties);
+      ..addAll(loadedOwnerProperties);
 
-    apartments
+    ownerApartments
       ..clear()
       ..addAll(ownerUnits);
 
     debugPrint(
       'OWNER PROPERTIES: loaded '
-      '${properties.length} properties and '
-      '${apartments.length} units for owner ${user.id}',
+      '${ownerProperties.length} properties and '
+      '${ownerApartments.length} units for owner ${user.id}',
     );
 
-    for (final property in properties) {
+    for (final property in ownerProperties) {
       debugPrint(
         'OWNER PROPERTY: ${property.name} '
         '(${property.id}) owner=${property.ownerId}',
@@ -8100,9 +8160,21 @@ class OpenNestStore {
 
   // Data is loaded from Supabase.
   // No hardcoded properties or apartments.
+  // ============================================================
+  // PUBLIC MARKETPLACE STATE
+  // ============================================================
+
   static final List<Property> properties = [];
 
   static final List<Apartment> apartments = [];
+
+  // ============================================================
+  // OWNER / PRIVATE MANAGEMENT STATE
+  // ============================================================
+
+  static final List<Property> ownerProperties = [];
+
+  static final List<Apartment> ownerApartments = [];
 
   static final List<Owner> owners = [];
 
@@ -11275,10 +11347,10 @@ class _LandlordsPageState extends State<LandlordsPage> {
 
       debugPrint(
         'LANDLORDS PAGE: Owner properties loaded = '
-        '${OpenNestStore.properties.length}',
+        '${OpenNestStore.ownerProperties.length}',
       );
 
-      for (final property in OpenNestStore.properties) {
+      for (final property in OpenNestStore.ownerProperties) {
         debugPrint(
           'LANDLORDS PAGE PROPERTY: '
           '${property.name} (${property.id}) '
@@ -12946,10 +13018,12 @@ class _JUMAAEntryPageState extends State<JUMAAEntryPage> {
                       width: 1.2,
                     ),
                   ),
-                  child: const Icon(
-                    Icons.home_work_rounded,
-                    color: Colors.white,
-                    size: 36,
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Image.asset(
+                      'assets/images/jumaa-logo.jpeg',
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
 
@@ -13733,7 +13807,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           .from('properties')
           .insert({
             'owner_id': user.id,
-            'landlord_id': user.id,
             'name': propertyName,
             'county': _selectedCounty!,
             'subcounty': _selectedSubcounty!,
@@ -13757,7 +13830,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
       if (propertyId.isNotEmpty) {
         for (int i = 1; i <= units; i++) {
-          OpenNestStore.apartments.add(
+          OpenNestStore.ownerApartments.add(
             Apartment(
               id: '${propertyId}_unit_$i',
               propertyId: propertyId,
@@ -14638,25 +14711,17 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
 
       debugPrint('REGISTRATION STEP 1: Auth successful');
 
-      // Create the owner profile while authenticated.
-      await OpenNestStore.supabase.from('profiles').upsert({
-        'id': user.id,
-        'full_name': ownerName,
-        'email': email,
-        'phone': phone,
-        'role': 'owner',
-      });
+      debugPrint('REGISTRATION STEP 2: Promoting profile to owner');
 
-      debugPrint('REGISTRATION STEP 2: Profile created');
+      await OpenNestStore.supabase.rpc(
+        'promote_current_user_to_owner',
+        params: {
+          'p_full_name': ownerName,
+          'p_phone': phone,
+        },
+      );
 
-      await OpenNestStore.supabase.from('landlords').upsert({
-        'id': user.id,
-        'full_name': ownerName,
-        'email': email,
-        'phone': phone,
-      });
-
-      debugPrint('REGISTRATION STEP 2B: Landlord record created');
+      debugPrint('REGISTRATION STEP 2: Profile promoted to owner');
 
       // ----------------------------------------------------------
       // 2. Create the property belonging to this owner.
@@ -14667,7 +14732,6 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
           .from('properties')
           .insert({
             'owner_id': user.id,
-            'landlord_id': user.id,
             'name': propertyName,
             'county': _selectedCounty!,
             'subcounty': _selectedSubcounty!,
@@ -14726,14 +14790,24 @@ class _RegisterApartmentPageState extends State<RegisterApartmentPage> {
         address: address,
       );
 
+      debugPrint('REGISTRATION STEP 3A: Adding owner to local state');
       OpenNestStore.owners.add(owner);
+      debugPrint('REGISTRATION STEP 3A: Owner added');
+
+      debugPrint('REGISTRATION STEP 3B: Saving owner locally');
       await OpenNestStore.saveOwners();
+      debugPrint('REGISTRATION STEP 3B: Owner saved locally');
 
       // ----------------------------------------------------------
       // 6. Reload properties and units from Supabase.
       // ----------------------------------------------------------
+      debugPrint('REGISTRATION STEP 3C: Loading owner properties');
       await OpenNestStore.loadOwnerPropertiesFromSupabase();
+      debugPrint('REGISTRATION STEP 3C: Owner properties loaded');
+
+      debugPrint('REGISTRATION STEP 3D: Loading units');
       await OpenNestStore.loadUnitsFromSupabase();
+      debugPrint('REGISTRATION STEP 3D: Units loaded');
 
       if (!mounted) return;
 

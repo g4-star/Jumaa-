@@ -151,8 +151,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           onRefresh: () async {
             try {
               await Future.wait([
-                OpenNestStore.loadPropertiesFromSupabase(),
-                OpenNestStore.loadUnitsFromSupabase(),
+                OpenNestStore.loadOwnerPropertiesFromSupabase(),
                 OpenNestStore.loadLandlords(),
               ]);
             } catch (e) {
